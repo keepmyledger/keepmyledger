@@ -148,20 +148,40 @@ CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority DESC);
 
 -- Seed transfer / cashback auto-rules for the owner user.
 INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
-SELECT '00000000-0000-0000-0000-000000000001', r.name, r.pat, 'substring', c.id, 100
-FROM (VALUES
-  ('Auto: Chase payment received',  'Payment Thank You', 'Credit Card Payment'),
-  ('Auto: Amex autopay',            'AUTOPAY PAYMENT',   'Credit Card Payment'),
-  ('Auto: Amex online payment',     'ONLINE PAYMENT',    'Credit Card Payment'),
-  ('Auto: M&T credit card payment', 'AMERICAN EXPRESS',  'Credit Card Payment'),
-  ('Auto: M&T Chase payment',       'CHASE CREDIT CRD',  'Credit Card Payment'),
-  ('Auto: Amex cash rebate',        'CASH REBATE',       'Cash Back Rebate'),
-  ('Auto: Amex cash reward',        'CASH REWARD',       'Cash Back Rebate'),
-  ('Auto: Chase cashback bonus',    'CASHBACK BONUS',    'Cash Back Rebate'),
-  ('Auto: Chase redemption credit', 'REDEMPTION CREDIT', 'Cash Back Rebate')
-) AS r(name, pat, cat)
-JOIN categories c ON c.name = r.cat
-  AND c.user_id = '00000000-0000-0000-0000-000000000001';
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Chase payment received', 'Payment Thank You', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Credit Card Payment' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Amex autopay', 'AUTOPAY PAYMENT', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Credit Card Payment' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Amex online payment', 'ONLINE PAYMENT', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Credit Card Payment' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: M&T credit card payment', 'AMERICAN EXPRESS', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Credit Card Payment' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: M&T Chase payment', 'CHASE CREDIT CRD', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Credit Card Payment' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Amex cash rebate', 'CASH REBATE', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Cash Back Rebate' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Amex cash reward', 'CASH REWARD', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Cash Back Rebate' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Chase cashback bonus', 'CASHBACK BONUS', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Cash Back Rebate' AND c.user_id = '00000000-0000-0000-0000-000000000001';
+
+INSERT OR IGNORE INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
+SELECT '00000000-0000-0000-0000-000000000001', 'Auto: Chase redemption credit', 'REDEMPTION CREDIT', 'substring', c.id, 100
+FROM categories c WHERE c.name = 'Cash Back Rebate' AND c.user_id = '00000000-0000-0000-0000-000000000001';
 
 -- ── transactions ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS transactions (
