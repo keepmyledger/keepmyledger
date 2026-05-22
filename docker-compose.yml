@@ -1,0 +1,28 @@
+# Local Postgres for development and tests.
+#
+#   docker compose up -d         # start
+#   docker compose down -v       # stop and wipe data
+#
+# Use `DATABASE_URL=postgres://kml:kml@127.0.0.1:5433/kml` in the server env
+# to point the app at this instance. The non-standard port (5433) avoids
+# clashing with any host-installed Postgres.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: keepmyledger-pg
+    environment:
+      POSTGRES_USER: kml
+      POSTGRES_PASSWORD: kml
+      POSTGRES_DB: kml
+    ports:
+      - "5433:5432"
+    volumes:
+      - kml-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kml -d kml"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kml-pgdata:

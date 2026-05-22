@@ -1,0 +1,129 @@
+/* KeepMyLedger global styles.
+   Brand palette + typography from STYLING.md. Inline styles in components
+   reference web/src/styles/tokens.ts; this file owns base CSS variables,
+   Google Fonts, and mobile-responsive overrides.
+   Class hooks: .app-nav, .app-main, .table-wrap. */
+
+@import url('https://fonts.googleapis.com/css2?family=Bree+Serif&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Gold */
+  --kml-gold:         #D4A72C;
+  --kml-gold-soft:    #F2C14E;
+  --kml-gold-antique: #9A6B12;
+  /* Green */
+  --kml-green:        #1F5C4A;
+  --kml-green-soft:   #2E7D61;
+  /* Neutrals */
+  --kml-warm-white:   #FFFDF8;
+  --kml-cream:        #F7F3E8;
+  --kml-cream-deep:   #EFE8D4;
+  --kml-slate:        #2B2B2B;
+  --kml-gray:         #5E5E5E;
+  --kml-line:         #E6DFCB;
+
+  --kml-font-heading: "Bree Serif", "Merriweather", Georgia, serif;
+  --kml-font-body:    "Inter", "Lato", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--kml-font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--kml-slate);
+  background: var(--kml-warm-white);
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--kml-font-heading);
+  color: var(--kml-slate);
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+h1 { font-size: 28px; margin: 0 0 12px; }
+h2 { font-size: 20px; margin: 24px 0 8px; }
+h3 { font-size: 17px; margin: 16px 0 6px; }
+
+a { color: var(--kml-green-soft); }
+a:hover { color: var(--kml-green); }
+
+button { font-family: inherit; }
+
+code, kbd, pre, samp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+input, select, textarea { font-family: inherit; }
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid rgba(46, 125, 97, 0.45); /* forest green @ 45% */
+  outline-offset: 1px;
+}
+
+::selection {
+  background: rgba(242, 193, 78, 0.45); /* soft gold */
+  color: var(--kml-slate);
+}
+
+/* Table wrappers may need horizontal scroll for wide tables */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap table { min-width: 100%; }
+
+/* Show/hide helpers for desktop vs mobile views */
+.desktop-only { display: block; }
+.mobile-only  { display: none; }
+@media (max-width: 720px) {
+  .desktop-only { display: none !important; }
+  .mobile-only  { display: block !important; }
+}
+
+/* Login: two-column hero + sign-in card on wider viewports */
+@media (min-width: 860px) {
+  .kml-login-grid { grid-template-columns: minmax(0, 1.2fr) minmax(360px, 1fr) !important; }
+}
+
+/* Nav: allow horizontal scroll on small screens so all links remain reachable */
+.app-nav {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.app-nav::-webkit-scrollbar { display: none; }
+.app-nav a { white-space: nowrap; flex: 0 0 auto; }
+.app-nav .brand { flex: 0 0 auto; white-space: nowrap; }
+
+@media (pointer: coarse) {
+  button { min-height: 32px; }
+}
+
+@media (max-width: 720px) {
+  .app-main {
+    padding: 12px !important;
+  }
+  .app-nav {
+    padding: 0 8px !important;
+    gap: 0 !important;
+  }
+  .app-nav .brand {
+    font-size: 16px !important;
+    margin-right: 8px !important;
+  }
+  .app-nav a {
+    padding: 12px 10px !important;
+    font-size: 14px !important;
+  }
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+  table th, table td {
+    padding: 8px 8px !important;
+  }
+  h1 { font-size: 22px !important; }
+  h2 { font-size: 16px !important; }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "@keepmyledger/server",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && mkdir -p dist/db/migrations dist/db/migrations-pg && cp src/db/migrations/*.sql dist/db/migrations/ && cp src/db/migrations-pg/*.sql dist/db/migrations-pg/",
+    "dev": "NODE_OPTIONS=--experimental-sqlite ts-node-dev --respawn --transpile-only src/index.ts",
+    "lint": "npm run build --prefix ../shared && tsc --noEmit",
+    "start": "node --experimental-sqlite dist/index.js",
+    "test": "NODE_ENV=test NODE_OPTIONS='--experimental-sqlite --no-warnings' jest",
+    "test:pg": "NODE_ENV=test TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://kml:kml@127.0.0.1:5433/kml} NODE_OPTIONS='--experimental-sqlite --no-warnings' jest --runInBand",
+    "test:both": "npm test && npm run test:pg"
+  },
+  "dependencies": {
+    "@keepmyledger/shared": "*",
+    "argon2": "^0.44.0",
+    "connect-pg-simple": "^10.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "express-session": "^1.19.0",
+    "googleapis": "^171.4.0",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.52.1",
+    "otpauth": "^9.5.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^4.10.38",
+    "pg": "^8.21.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/connect-pg-simple": "^7.0.3",
+    "@types/express": "^4.17.21",
+    "@types/express-session": "^1.19.0",
+    "@types/jest": "^29.5.12",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^22.0.0",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/pg": "^8.20.0",
+    "@types/qrcode": "^1.5.6",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.5",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}

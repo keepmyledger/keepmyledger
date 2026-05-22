@@ -1,0 +1,55 @@
+import { makeTestDb, TestDb } from '../helpers/db';
+import { OWNER_USER_ID } from '../../repos/impl';
+
+describe('SqliteUserRepo', () => {
+  let h: TestDb;
+  beforeEach(async () => { h = await makeTestDb(); });
+  afterEach(() => h.close());
+
+  it('getOwner returns the seeded singleton', async () => {
+    const owner = await h.userRepo.getOwner();
+    expect(owner.id).toBe(OWNER_USER_ID);
+  });
+
+  it('upsertIdentity is idempotent on (provider, providerUserId)', async () => {
+    const u = await h.userRepo.create({ email: 'a@b.c', name: 'A' });
+    await h.userRepo.upsertIdentity({ userId: u.id, provider: 'google', providerUserId: 'g-1', email: 'a@b.c' });
+    await h.userRepo.upsertIdentity({ userId: u.id, provider: 'google', providerUserId: 'g-1', email: 'changed@b.c' });
+    const found = await h.userRepo.findByIdentity('google', 'g-1');
+    expect(found?.id).toBe(u.id);
+  });
+
+  it('provisionDefaults is idempotent', async () => {
+    const u = await h.userRepo.create({ email: 'd@e.f', name: 'D' });
+    await h.userRepo.provisionDefaults(u.id);
+    const repos1 = (await import('../../repos/impl')).createRepos(h.db, u.id);
+    const cats1 = await repos1.categories.findAll();
+    const rules1 = await repos1.rules.findAll();
+    await h.userRepo.provisionDefaults(u.id);
+    const cats2 = await repos1.categories.findAll();
+    const rules2 = await repos1.rules.findAll();
+    expect(cats2.length).toBe(cats1.length);
+    expect(rules2.length).toBe(rules1.length);
+  });
+
+  it('provisionDefaults seeds auto-rules pointing at the user\'s own categories', async () => {
+    const u = await h.userRepo.create({ email: 'r@e.f', name: 'R' });
+    await h.userRepo.provisionDefaults(u.id);
+    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id);
+    const rules = await repos.rules.findAll();
+    const cats = await repos.categories.findAll();
+    const catById = new Map(cats.map((c) => [c.id, c]));
+
+    // At least the auto-rules we seed in UserRepoImpl
+    expect(rules.length).toBeGreaterThanOrEqual(9);
+    const chasePayment = rules.find((r) => r.name === 'Auto: Chase payment received');
+    expect(chasePayment).toBeDefined();
+    expect(chasePayment!.descriptionPattern).toBe('Payment Thank You');
+    expect(catById.get(chasePayment!.categoryId)?.name).toBe('Credit Card Payment');
+
+    // Every auto-rule category must belong to THIS user (tenant isolation)
+    for (const r of rules) {
+      expect(catById.has(r.categoryId)).toBe(true);
+    }
+  });
+});

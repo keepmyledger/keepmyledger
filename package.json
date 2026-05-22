@@ -1,0 +1,15 @@
+{
+  "name": "keepmyledger",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "workspaces": ["shared", "server", "web"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w web",
+    "start": "npm run build && node --experimental-sqlite server/dist/index.js",
+    "lint": "npm run lint -w server && npm run lint -w web"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
