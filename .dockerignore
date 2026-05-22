@@ -1,0 +1,38 @@
+# Build artifacts and dependencies
+node_modules
+**/node_modules
+**/dist
+**/.cache
+
+# Local data — never bake into the image
+data
+server/data
+**/data/*.db
+**/uploads
+
+# Env files (use platform secrets instead)
+.env
+**/.env
+**/.env.*
+
+# Editor / OS
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Tests + tooling not needed at runtime
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+jest.config.json
+**/jest.config.json
+**/coverage
+
+# Documentation
+README.md
+TODO.md
+docker-compose.yml
+fly.toml

@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, oss]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        db: [sqlite, postgres]
+
+    services:
+      postgres:
+        if: matrix.db == 'postgres'
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: keepmyledger_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d keepmyledger_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      SESSION_SECRET: ci-session-secret
+      APP_MODE: selfhost
+      OPENAI_API_KEY: test-key
+      DATABASE_URL: ${{ matrix.db == 'postgres' && 'postgres://postgres:postgres@localhost:5432/keepmyledger_test' || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Lint server
+        run: npm run lint --workspace=server
+
+      - name: Build all workspaces
+        run: npm run build
+
+      - name: Test server
+        run: npm test --workspace=server
