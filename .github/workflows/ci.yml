@@ -15,7 +15,6 @@ jobs:
 
     services:
       postgres:
-        if: matrix.db == 'postgres'
         image: postgres:16
         env:
           POSTGRES_USER: postgres
