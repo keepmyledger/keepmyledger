@@ -1,6 +1,15 @@
 import { DatabaseSync } from 'node:sqlite';
-import { Account, CreateAccountPayload, UpdateAccountPayload } from '@keepmyledger/shared';
+import { Account, CreateAccountPayload, CsvColumnMapping, UpdateAccountPayload } from '@keepmyledger/shared';
 import { AccountRepo } from '../AccountRepo';
+
+function parseCsvMapping(raw: unknown): CsvColumnMapping | null {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw as CsvColumnMapping;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as CsvColumnMapping; } catch { return null; }
+  }
+  return null;
+}
 
 function toAccount(row: Record<string, unknown>): Account {
   return {
@@ -10,6 +19,7 @@ function toAccount(row: Record<string, unknown>): Account {
     accountKind: row.account_kind as Account['accountKind'],
     lastStatementPeriod: row.last_statement_period as string | null,
     createdAt: row.created_at as string,
+    csvMapping: parseCsvMapping(row.csv_mapping),
   };
 }
 
@@ -39,6 +49,10 @@ export class SqliteAccountRepo implements AccountRepo {
     if (payload.bankType !== undefined) { fields.push('bank_type = ?'); values.push(payload.bankType); }
     if (payload.accountKind !== undefined) { fields.push('account_kind = ?'); values.push(payload.accountKind); }
     if (payload.lastStatementPeriod !== undefined) { fields.push('last_statement_period = ?'); values.push(payload.lastStatementPeriod); }
+    if (payload.csvMapping !== undefined) {
+      fields.push('csv_mapping = ?');
+      values.push(payload.csvMapping === null ? null : JSON.stringify(payload.csvMapping));
+    }
     if (fields.length === 0) return this.findById(id);
     values.push(id, this.userId);
     this.db.prepare(`UPDATE accounts SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...(values as (string | number | null)[]));

@@ -145,6 +145,15 @@ export class SqliteTransactionRepo implements TransactionRepo {
     return this.db.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?').run(id, this.userId).changes > 0;
   }
 
+  async bulkDelete(ids: number[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = this.db
+      .prepare(`DELETE FROM transactions WHERE id IN (${placeholders}) AND user_id = ?`)
+      .run(...([...ids, this.userId] as (string | number)[]));
+    return Number(result.changes);
+  }
+
   async setRuleId(id: number, ruleId: number | null): Promise<void> {
     this.db.prepare('UPDATE transactions SET rule_id = ? WHERE id = ? AND user_id = ?').run(ruleId, id, this.userId);
   }
