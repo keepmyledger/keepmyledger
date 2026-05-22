@@ -21,7 +21,7 @@ export function AboutPage() {
           href="https://github.com/keepmyledger/keepmyledger"
           style={{ color: colors.goldRich, textDecoration: 'none', fontWeight: 600 }}
         >
-          GitHub ->
+            GitHub {'->'}
         </a>
         <a
           href="https://github.com/keepmyledger/keepmyledger/blob/main/LICENSE"
