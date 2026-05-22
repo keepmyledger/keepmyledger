@@ -48,7 +48,10 @@ main() {
   git fetch --tags origin "$PRIMARY_BRANCH"
   ensure_refs
 
-  mapfile -t all_commits < <(collect_commits)
+  all_commits=()
+  while IFS= read -r commit; do
+    all_commits+=("$commit")
+  done < <(collect_commits)
 
   if [[ ${#all_commits[@]} -eq 0 ]]; then
     echo "No new commits since ${BASE_TAG}."
