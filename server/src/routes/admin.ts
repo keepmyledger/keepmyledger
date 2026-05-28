@@ -23,10 +23,13 @@ function maskEmail(email: string | null): string | null {
   return email[0] + '***' + email.slice(at);
 }
 
-/** Build a date expression for "N days ago" in the right SQL dialect. */
+/** Build a date expression for "N days ago" in the right SQL dialect.
+ *  Both backends store timestamps as TEXT in `YYYY-MM-DD HH24:MI:SS` UTC
+ *  (see migrations-pg/001_init.sql header), so the pg branch must also
+ *  return TEXT — otherwise `text_col >= timestamptz` errors out. */
 function daysAgo(db: DbAdapter, n: number): string {
   return db.backend === 'pg'
-    ? `NOW() - INTERVAL '${n} days'`
+    ? `to_char((now() - INTERVAL '${n} days') AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
     : `datetime('now', '-${n} days')`;
 }
 
