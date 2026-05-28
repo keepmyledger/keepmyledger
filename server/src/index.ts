@@ -156,7 +156,7 @@ async function bootstrap(): Promise<void> {
   }
 
   app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  // urlencoded is NOT mounted globally — only on /api/auth/apple/callback (form_post).
 
   // Session store: driver chosen via `auth/sessionStore` factory.
   // `express-session.Store` is the migration boundary; swap in Redis /

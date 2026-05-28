@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import passport from 'passport';
 import { DbAdapter } from '../db/adapter';
 import { getUserRepo } from '../auth/context';
@@ -66,6 +66,7 @@ export function authRouter(db: DbAdapter, providers: AvailableProvider[]): Route
 
     router.post(
       '/apple/callback',
+      express.urlencoded({ extended: true }), // Apple uses response_mode=form_post
       passport.authenticate('apple', { failureRedirect: '/login?error=oauth' }),
       (_req, res) => res.redirect('/'),
     );

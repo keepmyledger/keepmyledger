@@ -114,10 +114,14 @@ function fileKindFromToken(token: string): 'pdf' | 'csv' | 'qif' | 'ofx' {
 
 /** Resolve a preview token to a real on-disk path, guarding against traversal. */
 function resolveToken(token: unknown): string {
-  if (typeof token !== 'string' || !/^[a-f0-9]{24}\.(pdf|csv|tsv|qif|ofx|qfx)$/i.test(token)) {
+  if (typeof token !== 'string') throw new Error('Invalid preview token');
+  // path.basename strips any directory components before the regex check — defence in depth
+  // against path traversal and ensures CodeQL recognises the sanitisation.
+  const safe = path.basename(token);
+  if (!/^[a-f0-9]{24}\.(pdf|csv|tsv|qif|ofx|qfx)$/i.test(safe)) {
     throw new Error('Invalid preview token');
   }
-  const full = path.join(UPLOAD_DIR, token);
+  const full = path.join(UPLOAD_DIR, safe);
   const rel = path.relative(UPLOAD_DIR, full);
   if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Invalid preview token');
   if (!fs.existsSync(full)) throw new Error('Preview expired or not found');
