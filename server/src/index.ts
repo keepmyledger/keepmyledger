@@ -171,10 +171,7 @@ async function bootstrap(): Promise<void> {
   }
   console.log(`[session] store=${sessionDriver}`);
 
-  // lgtm[js/missing-token-validation] -- CSRF is mitigated by sameSite:'lax' on the session
-  // cookie. All state-mutating endpoints accept JSON only; urlencoded is scoped exclusively
-  // to /api/auth/apple/callback (Apple's form_post). No separate CSRF token is needed.
-  app.use(session({
+  app.use(session({ // lgtm[js/missing-token-validation] -- SameSite=Lax cookie + JSON-only API; urlencoded scoped to /api/auth/apple/callback only
     store: sessionStore,
     secret: SESSION_SECRET,
     resave: false,

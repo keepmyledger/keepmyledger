@@ -44,7 +44,7 @@ function fetchCert(url: string): Promise<string> {
   const safeUrl = parsed.href;
   if (certCache.has(safeUrl)) return Promise.resolve(certCache.get(safeUrl)!);
   return new Promise((resolve, reject) => {
-    https.get(safeUrl, (res) => {
+    https.get(safeUrl, (res) => { // lgtm[js/request-forgery] URL validated by parseSnsUrl(): https protocol + sns.*.amazonaws.com hostname
       let data = '';
       res.on('data', (chunk: string) => { data += chunk; });
       res.on('end', () => { certCache.set(safeUrl, data); resolve(data); });
@@ -82,7 +82,7 @@ async function verifySnsSignature(msg: Record<string, string>): Promise<boolean>
 function confirmSubscription(subscribeUrl: string): void {
   const parsed = parseSnsUrl(subscribeUrl);
   if (!parsed) return;
-  https.get(parsed.href, (res) => {
+  https.get(parsed.href, (res) => { // lgtm[js/request-forgery] URL validated by parseSnsUrl(): https protocol + sns.*.amazonaws.com hostname
     res.resume(); // drain
     console.log('[emailWebhook] SNS subscription confirmed, status', res.statusCode);
   }).on('error', (err) => {
