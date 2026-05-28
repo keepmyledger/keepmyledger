@@ -90,7 +90,7 @@ export function exportsRouter(): Router {
       const acct = accounts.get(tx.accountId);
       const cat = tx.categoryId != null ? categories.get(tx.categoryId) : null;
       const txReceipts = await repos.receipts.findByTransactionId(tx.id);
-      const receipts = txReceipts.map((r) => r.driveFileName).join('; ');
+      const receipts = txReceipts.map((r) => r.driveFileName ?? r.originalFilename ?? `receipt-${r.id}`).join('; ');
       lines.push([
         csvEscape(tx.date),
         csvEscape(acct?.name ?? ''),

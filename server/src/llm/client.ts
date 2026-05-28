@@ -3,9 +3,9 @@
  * OpenAI-compatible endpoint, Ollama, vLLM, etc.).
  *
  * Configure via env vars:
- *   LLM_API_KEY    — required
- *   LLM_BASE_URL   — defaults to OpenAI
- *   LLM_MODEL      — defaults to "gpt-4o-mini"
+ *   LLM_API_KEY:    required
+ *   LLM_BASE_URL:   defaults to OpenAI
+ *   LLM_MODEL:      defaults to "gpt-4o-mini"
  */
 import OpenAI from 'openai';
 

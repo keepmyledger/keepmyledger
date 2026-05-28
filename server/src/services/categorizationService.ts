@@ -15,7 +15,7 @@ export class CategorizationService {
    * 1. Try rules in priority order.
    * 2. Fall back to history heuristic → mark as "suggested".
    *
-   * Never overwrites a `manual` category — the user is the source of truth.
+   * Never overwrites a `manual` category; the user is the source of truth.
    */
   async categorize(tx: Transaction): Promise<void> {
     if (tx.categorySource === 'manual') return;
@@ -99,7 +99,7 @@ export class CategorizationService {
         try {
           if (!new RegExp(rule.descriptionPattern, 'i').test(tx.description)) continue;
         } catch {
-          continue; // Invalid regex in rule — skip
+          continue; // Invalid regex in rule, skipping
         }
       } else {
         // substring

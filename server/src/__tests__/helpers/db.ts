@@ -14,8 +14,16 @@ export interface TestDb {
   userRepo: UserRepo;
   /** Owner user id (seeded by migration 007). */
   ownerId: string;
+  /** Owner personal org id (same as ownerId by convention). */
+  ownerOrgId: string;
+  /** Owner personal business id. */
+  ownerBusinessId: number;
   /** A second, fully-provisioned user id for tenant-isolation tests. */
   altId: string;
+  /** Alt user personal org id. */
+  altOrgId: string;
+  /** Alt user personal business id. */
+  altBusinessId: number;
   /** Repos scoped to the owner user. */
   owner: Repos;
   /** Repos scoped to the alt user. */
@@ -42,14 +50,27 @@ async function makeSqliteTestDb(): Promise<TestDb> {
   raw.exec('PRAGMA foreign_keys=ON');
   runMigrations(raw);
   const db = new SqliteAdapter(raw);
-  const { userRepo, altId } = await provisionUsers(db);
+  const { userRepo, altId, altOrgId, altBusinessId } = await provisionUsers(db);
+
+  // Owner org/business are seeded by migration 022; owner personal org id == OWNER_USER_ID.
+  const ownerOrgId = OWNER_USER_ID;
+  const ownerBizRow = await db.get<{ id: number }>(
+    `SELECT id FROM businesses WHERE org_id = ? AND name = 'Personal' LIMIT 1`,
+    [ownerOrgId],
+  );
+  const ownerBusinessId = Number(ownerBizRow!.id);
+
   return {
     db,
     userRepo,
     ownerId: OWNER_USER_ID,
+    ownerOrgId,
+    ownerBusinessId,
     altId,
-    owner: createRepos(db, OWNER_USER_ID),
-    alt: createRepos(db, altId),
+    altOrgId,
+    altBusinessId,
+    owner: createRepos(db, OWNER_USER_ID, ownerOrgId, ownerBusinessId),
+    alt: createRepos(db, altId, altOrgId, altBusinessId),
     backend: 'sqlite',
     close: () => raw.close(),
   };
@@ -70,14 +91,26 @@ async function makePgTestDb(connectionString: string): Promise<TestDb> {
   await runPgMigrations(pool);
   const db = new PgAdapter(pool);
 
-  const { userRepo, altId } = await provisionUsers(db);
+  const { userRepo, altId, altOrgId, altBusinessId } = await provisionUsers(db);
+
+  const ownerOrgId = OWNER_USER_ID;
+  const ownerBizRow = await db.get<{ id: number }>(
+    `SELECT id FROM businesses WHERE org_id = $1 AND name = 'Personal' LIMIT 1`,
+    [ownerOrgId],
+  );
+  const ownerBusinessId = Number(ownerBizRow!.id);
+
   return {
     db,
     userRepo,
     ownerId: OWNER_USER_ID,
+    ownerOrgId,
+    ownerBusinessId,
     altId,
-    owner: createRepos(db, OWNER_USER_ID),
-    alt: createRepos(db, altId),
+    altOrgId,
+    altBusinessId,
+    owner: createRepos(db, OWNER_USER_ID, ownerOrgId, ownerBusinessId),
+    alt: createRepos(db, altId, altOrgId, altBusinessId),
     backend: 'pg',
     close: async () => {
       await pool.end();
@@ -91,10 +124,12 @@ async function makePgTestDb(connectionString: string): Promise<TestDb> {
   };
 }
 
-async function provisionUsers(db: DbAdapter): Promise<{ userRepo: UserRepo; altId: string }> {
+async function provisionUsers(db: DbAdapter): Promise<{ userRepo: UserRepo; altId: string; altOrgId: string; altBusinessId: number }> {
   const userRepo = createUserRepo(db);
-  await userRepo.getOwner(); // ensure owner row exists
+  await userRepo.getOwner(); // ensure owner row exists (may also be seeded by migration 007)
+  // provisionDefaults for owner ensures their org+business exist (idempotent).
+  await userRepo.provisionDefaults(OWNER_USER_ID);
   const alt = await userRepo.create({ email: 'alt@example.com', name: 'Alt User' });
-  await userRepo.provisionDefaults(alt.id);
-  return { userRepo, altId: alt.id };
+  const { orgId: altOrgId, businessId: altBusinessId } = await userRepo.provisionDefaults(alt.id);
+  return { userRepo, altId: alt.id, altOrgId, altBusinessId };
 }

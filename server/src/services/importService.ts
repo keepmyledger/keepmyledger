@@ -1,22 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 import pdfParse from 'pdf-parse';
-import { ImportResult, AccountKind, CsvColumnMapping } from '@keepmyledger/shared';
+import { ImportResult, AccountKind, CsvColumnMapping, PendingDuplicate, Transaction } from '@keepmyledger/shared';
 import { AccountRepo } from '../repos/AccountRepo';
 import { StatementRepo } from '../repos/StatementRepo';
 import { TransactionRepo } from '../repos/TransactionRepo';
-import { parseStatement } from '../parsers';
+import { parseStatement, parseStatementWithLlm, llmParser } from '../parsers';
 import { parseCsv } from '../parsers/csv';
 import { parseQif } from '../parsers/qif';
+import { parseOfx } from '../parsers/ofx';
 import { ParsedStatement } from '../parsers/types';
 import { extractPositionedText, groupByLine } from '../parsers/pdfPositional';
 import { hashTransaction } from '../parsers/utils';
-import { llmParser } from '../parsers/llm';
 import { CategorizationService } from './categorizationService';
 import { LlmBankHintRepo } from '../repos/LlmBankHintRepo';
 
-/** Trigger the column-structure analysis after this many LLM hits per bank. */
-const LLM_HINT_THRESHOLD = 10;
+/** Save the column-structure hint on the first LLM use per bank. */
+const LLM_HINT_THRESHOLD = 1;
 
 export class ImportService {
   constructor(
@@ -31,8 +31,26 @@ export class ImportService {
 
   async previewPdf(filePath: string): Promise<ParsedStatement> {
     const buffer = fs.readFileSync(filePath);
-    const pdfData = await pdfParse(buffer);
+    let pdfData: Awaited<ReturnType<typeof pdfParse>>;
+    try {
+      pdfData = await pdfParse(buffer);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/password|encrypt/i.test(msg)) {
+        throw new Error(
+          'This PDF is password-protected. Remove the password in your PDF viewer and try again.'
+        );
+      }
+      throw err;
+    }
     const text = pdfData.text;
+    // Image-only PDFs have a text layer with virtually no content.
+    if (text.trim().length < 50) {
+      throw new Error(
+        'This PDF appears to be image-based and contains no extractable text. ' +
+        'Export a text-based PDF from your bank\'s website and try again.'
+      );
+    }
     let positional;
     try {
       const items = await extractPositionedText(buffer);
@@ -40,9 +58,19 @@ export class ImportService {
     } catch (err) {
       console.warn('[import] positional extraction failed, continuing with text-only:', err);
     }
-    const parsed = await parseStatement(text, { positional });
+    // Never auto-invokes LLM — returns template or generic result only.
+    // Call previewPdfWithLlm() after obtaining explicit user consent.
+    return parseStatement(text, { positional });
+  }
 
-    if (parsed.parserUsed === 'llm' && parsed.bankName && this.llmBankHintRepo) {
+  /** Parse with the LLM after the user has explicitly consented. */
+  async previewPdfWithLlm(filePath: string, accountKind?: AccountKind): Promise<ParsedStatement> {
+    const buffer = fs.readFileSync(filePath);
+    const pdfData = await pdfParse(buffer);
+    const text = pdfData.text;
+    const parsed = await parseStatementWithLlm(text, accountKind);
+
+    if (parsed.bankName && this.llmBankHintRepo) {
       this.trackLlmHit(parsed.bankName, text).catch((err) => {
         console.warn('[import] llm bank hint tracking failed:', err);
       });
@@ -79,6 +107,11 @@ export class ImportService {
     return parseQif(text);
   }
 
+  async previewOfx(filePath: string): Promise<ParsedStatement> {
+    const text = fs.readFileSync(filePath, 'utf8');
+    return parseOfx(text);
+  }
+
   // ── One-shot import (back-compat) ────────────────────────────────────────
 
   async importPdf(accountId: number, filePath: string): Promise<ImportResult> {
@@ -96,6 +129,11 @@ export class ImportService {
     return this.persistParsed(accountId, filePath, parsed);
   }
 
+  async importOfx(accountId: number, filePath: string): Promise<ImportResult> {
+    const parsed = await this.previewOfx(filePath);
+    return this.persistParsed(accountId, filePath, parsed);
+  }
+
   // ── Commit (persist already-parsed result) ───────────────────────────────
 
   async persistParsed(
@@ -106,7 +144,7 @@ export class ImportService {
     const account = await this.accountRepo.findById(accountId);
     if (!account) throw new Error(`Account ${accountId} not found`);
 
-    // Upsert statement row (idempotent — UNIQUE on account_id + period)
+    // Upsert statement row (idempotent; UNIQUE on account_id + period)
     let statement = await this.statementRepo.findByAccountAndPeriod(accountId, parsed.period);
     if (!statement) {
       statement = await this.statementRepo.create({
@@ -124,7 +162,7 @@ export class ImportService {
     // The LLM and CSV parsers already return storage convention, so do not flip.
     const isCreditCard = account.accountKind === 'credit_card';
     const shouldFlipSign = isCreditCard && parsed.parserUsed === 'template';
-    const toInsert = parsed.transactions.map((t) => {
+    const prepared = parsed.transactions.map((t) => {
       const amount = shouldFlipSign ? -t.amount : t.amount;
       const hash = hashTransaction(accountId, t.date, t.description, amount);
       return {
@@ -137,16 +175,37 @@ export class ImportService {
         categorySource: null,
         suggestedCategoryId: null,
         ruleId: null,
-        hasReceipt: false,
         notes: null,
         taxDescription: null,
         externalHash: hash,
       };
     });
 
-    // Bulk insert with dedup
-    const { inserted, skipped } = await this.txRepo.bulkCreate(
-      toInsert as Parameters<typeof this.txRepo.bulkCreate>[0]
+    // Partition: rows whose hash already exists in the DB are held back for
+    // user review (cross-import duplicate). In-file dups — i.e. two prepared
+    // rows in this batch sharing a hash — are intentionally allowed through
+    // (per #80: same-file dups are almost always legit, e.g. two $5 coffees
+    // on the same day).
+    const existingHashes = await this.txRepo.findExistingHashes(
+      accountId,
+      prepared.map((p) => p.externalHash),
+    );
+    const toInsert: typeof prepared = [];
+    const pendingHashes: string[] = [];
+    const parsedByHash = new Map<string, typeof prepared[number]>();
+    for (const p of prepared) {
+      if (existingHashes.has(p.externalHash)) {
+        if (!parsedByHash.has(p.externalHash)) {
+          parsedByHash.set(p.externalHash, p);
+          pendingHashes.push(p.externalHash);
+        }
+      } else {
+        toInsert.push(p);
+      }
+    }
+
+    const { inserted } = await this.txRepo.bulkCreate(
+      toInsert as Parameters<typeof this.txRepo.bulkCreate>[0],
     );
 
     // Update account's last statement period if newer
@@ -164,13 +223,79 @@ export class ImportService {
     // Re-fetch with categories populated
     const categorizedTxs = await this.txRepo.findAll({ statementId: statement.id });
 
+    // Build pendingReview by looking up each held-back hash's existing row.
+    const pendingReview: PendingDuplicate[] = [];
+    for (const hash of pendingHashes) {
+      const parsedRow = parsedByHash.get(hash)!;
+      const existing = await this.txRepo.findByHash(hash);
+      if (!existing) continue; // shouldn't happen — defensive
+      pendingReview.push({
+        externalHash: hash,
+        parsed: {
+          date: parsedRow.date,
+          description: parsedRow.description,
+          amount: parsedRow.amount,
+        },
+        existing,
+      });
+    }
+
     return {
       statementId: statement.id,
       period: parsed.period,
       parserUsed: parsed.parserUsed,
       transactionsImported: inserted,
-      transactionsDuplicated: skipped,
+      pendingReview,
       transactions: categorizedTxs,
     };
+  }
+
+  /**
+   * Resolve user decisions on cross-import duplicates surfaced by a prior
+   * import. `keep` re-inserts the row from the staged data (caller supplies
+   * the same {date, description, amount} that produced the hash); `skip`
+   * is a no-op (the row stays unimported).
+   *
+   * Returns the count actually inserted plus the newly-categorized rows.
+   */
+  async resolveDuplicates(
+    statementId: number,
+    decisions: Array<{
+      externalHash: string;
+      action: 'keep' | 'skip';
+      date: string;
+      description: string;
+      amount: number;
+    }>,
+  ): Promise<{ inserted: number; transactions: Transaction[] }> {
+    const statement = await this.statementRepo.findById(statementId);
+    if (!statement) throw new Error(`Statement ${statementId} not found`);
+
+    const keeps = decisions.filter((d) => d.action === 'keep');
+    if (keeps.length === 0) return { inserted: 0, transactions: [] };
+
+    const rows = keeps.map((d) => ({
+      accountId: statement.accountId,
+      statementId,
+      date: d.date,
+      description: d.description,
+      amount: d.amount,
+      categoryId: null,
+      categorySource: null,
+      suggestedCategoryId: null,
+      ruleId: null,
+      notes: null,
+      taxDescription: null,
+      externalHash: d.externalHash,
+    }));
+
+    const { inserted } = await this.txRepo.bulkCreate(
+      rows as Parameters<typeof this.txRepo.bulkCreate>[0],
+    );
+
+    const newTxs = await this.txRepo.findAll({ statementId });
+    await this.categorizationService.categorizeAll(newTxs);
+    const categorized = await this.txRepo.findAll({ statementId });
+    return { inserted, transactions: categorized };
   }
 }

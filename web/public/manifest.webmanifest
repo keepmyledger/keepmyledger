@@ -1,13 +1,13 @@
 {
-  "name": "KeepMyLedger",
-  "short_name": "KeepMyLedger",
+  "name": "Your App",
+  "short_name": "Your App",
   "description": "Keep your ledger — import statements, categorize, and report.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#FFFFFF",
-  "theme_color": "#1E293B",
+  "background_color": "#FFFDF8",
+  "theme_color": "#1F5C4A",
   "icons": [
     {
       "src": "/favicon.svg",

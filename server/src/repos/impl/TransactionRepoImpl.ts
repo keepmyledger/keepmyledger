@@ -1,4 +1,4 @@
-import { Transaction, UpdateTransactionPayload, CategoryKind } from '@keepmyledger/shared';
+import { Transaction, TransactionSplit, UpdateTransactionPayload, CategoryKind } from '@keepmyledger/shared';
 import {
   TransactionRepo,
   TransactionFilter,
@@ -26,11 +26,11 @@ function toTransaction(row: Record<string, unknown>): Transaction {
 }
 
 export class TransactionRepoImpl implements TransactionRepo {
-  constructor(private db: DbAdapter, private userId: string) {}
+  constructor(private db: DbAdapter, private businessId: number) {}
 
   async findAll(filter?: TransactionFilter): Promise<Transaction[]> {
-    const conditions: string[] = ['t.user_id = ?'];
-    const values: unknown[] = [this.userId];
+    const conditions: string[] = ['t.business_id = ?'];
+    const values: unknown[] = [this.businessId];
 
     if (filter?.accountId !== undefined) { conditions.push('account_id = ?'); values.push(filter.accountId); }
     if (filter?.statementId !== undefined) { conditions.push('statement_id = ?'); values.push(filter.statementId); }
@@ -59,29 +59,38 @@ export class TransactionRepoImpl implements TransactionRepo {
   }
 
   async findById(id: number): Promise<Transaction | undefined> {
-    const row = await this.db.get('SELECT * FROM transactions WHERE id = ? AND user_id = ?', [id, this.userId]);
+    const row = await this.db.get('SELECT * FROM transactions WHERE id = ? AND business_id = ?', [id, this.businessId]);
     return row ? toTransaction(row) : undefined;
   }
 
   async findByHash(hash: string): Promise<Transaction | undefined> {
-    const row = await this.db.get('SELECT * FROM transactions WHERE external_hash = ? AND user_id = ?', [hash, this.userId]);
+    const row = await this.db.get('SELECT * FROM transactions WHERE external_hash = ? AND business_id = ?', [hash, this.businessId]);
     return row ? toTransaction(row) : undefined;
   }
 
-  async bulkCreate(transactions: Omit<Transaction, 'id'>[]): Promise<{ inserted: number; skipped: number }> {
-    if (transactions.length === 0) return { inserted: 0, skipped: 0 };
+  async findExistingHashes(accountId: number, hashes: string[]): Promise<Set<string>> {
+    if (hashes.length === 0) return new Set();
+    const placeholders = hashes.map(() => '?').join(', ');
+    const rows = await this.db.all<{ external_hash: string }>(
+      `SELECT external_hash FROM transactions
+       WHERE business_id = ? AND account_id = ? AND external_hash IN (${placeholders})`,
+      [this.businessId, accountId, ...hashes],
+    );
+    return new Set(rows.map((r) => r.external_hash));
+  }
+
+  async bulkCreate(transactions: Omit<Transaction, 'id'>[]): Promise<{ inserted: number }> {
+    if (transactions.length === 0) return { inserted: 0 };
     let inserted = 0;
-    let skipped = 0;
     await this.db.transaction(async (tx) => {
       for (const t of transactions) {
         const result = await tx.run(
           `INSERT INTO transactions
-            (user_id, account_id, statement_id, date, description, amount, category_id, category_source,
+            (business_id, account_id, statement_id, date, description, amount, category_id, category_source,
              suggested_category_id, rule_id, notes, tax_description, external_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (external_hash) DO NOTHING`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            this.userId,
+            this.businessId,
             t.accountId, t.statementId, t.date, t.description, t.amount,
             t.categoryId ?? null, t.categorySource ?? null,
             t.suggestedCategoryId ?? null, t.ruleId ?? null,
@@ -90,10 +99,10 @@ export class TransactionRepoImpl implements TransactionRepo {
             (t as unknown as Record<string, unknown>)['externalHash'] as string,
           ],
         );
-        if (result.changes > 0) inserted++; else skipped++;
+        if (result.changes > 0) inserted++;
       }
     });
-    return { inserted, skipped };
+    return { inserted };
   }
 
   async update(id: number, payload: UpdateTransactionPayload): Promise<Transaction | undefined> {
@@ -116,8 +125,8 @@ export class TransactionRepoImpl implements TransactionRepo {
       payload.amount !== undefined
     ) {
       const accountIdRow = await this.db.get<{ account_id: number }>(
-        'SELECT account_id FROM transactions WHERE id = ? AND user_id = ?',
-        [id, this.userId],
+        'SELECT account_id FROM transactions WHERE id = ? AND business_id = ?',
+        [id, this.businessId],
       );
       if (accountIdRow) {
         map['external_hash'] = hashTransaction(
@@ -133,14 +142,14 @@ export class TransactionRepoImpl implements TransactionRepo {
     if (entries.length === 0) return existing;
     const setClause = entries.map(([k]) => `${k} = ?`).join(', ');
     await this.db.run(
-      `UPDATE transactions SET ${setClause} WHERE id = ? AND user_id = ?`,
-      [...entries.map(([, v]) => v), id, this.userId],
+      `UPDATE transactions SET ${setClause} WHERE id = ? AND business_id = ?`,
+      [...entries.map(([, v]) => v), id, this.businessId],
     );
     return this.findById(id);
   }
 
   async delete(id: number): Promise<boolean> {
-    const result = await this.db.run('DELETE FROM transactions WHERE id = ? AND user_id = ?', [id, this.userId]);
+    const result = await this.db.run('DELETE FROM transactions WHERE id = ? AND business_id = ?', [id, this.businessId]);
     return result.changes > 0;
   }
 
@@ -148,40 +157,66 @@ export class TransactionRepoImpl implements TransactionRepo {
     if (ids.length === 0) return 0;
     const placeholders = ids.map(() => '?').join(', ');
     const result = await this.db.run(
-      `DELETE FROM transactions WHERE id IN (${placeholders}) AND user_id = ?`,
-      [...ids, this.userId],
+      `DELETE FROM transactions WHERE id IN (${placeholders}) AND business_id = ?`,
+      [...ids, this.businessId],
     );
     return result.changes;
   }
 
   async setRuleId(id: number, ruleId: number | null): Promise<void> {
-    await this.db.run('UPDATE transactions SET rule_id = ? WHERE id = ? AND user_id = ?', [ruleId, id, this.userId]);
+    await this.db.run('UPDATE transactions SET rule_id = ? WHERE id = ? AND business_id = ?', [ruleId, id, this.businessId]);
   }
 
   async setSuggestedCategoryId(id: number, categoryId: number | null): Promise<void> {
     await this.db.run(
-      'UPDATE transactions SET suggested_category_id = ? WHERE id = ? AND user_id = ?',
-      [categoryId, id, this.userId],
+      'UPDATE transactions SET suggested_category_id = ? WHERE id = ? AND business_id = ?',
+      [categoryId, id, this.businessId],
     );
   }
 
   async reportByCategory(year?: number): Promise<ReportByCategoryRow[]> {
     // Use substr() on YYYY-MM-DD text dates: works in both sqlite and pg.
     const yearClause = year ? "AND substr(t.date, 1, 4) = ?" : '';
-    const params: unknown[] = [this.userId];
-    if (year) params.push(String(year));
+    // Build params: first half goes to the non-split branch, second to the split branch.
+    const half1: unknown[] = [this.businessId];
+    if (year) half1.push(String(year));
+    const half2: unknown[] = [this.businessId];
+    if (year) half2.push(String(year));
+
     const rows = await this.db.all(`
-      SELECT
-        t.category_id     AS "categoryId",
-        c.name            AS "categoryName",
-        c.kind            AS kind,
-        SUM(t.amount)     AS total
-      FROM transactions t
-      LEFT JOIN categories c ON c.id = t.category_id
-      WHERE t.user_id = ? AND (c.kind IS NULL OR c.kind != 'transfer') ${yearClause}
-      GROUP BY t.category_id, c.name, c.kind
+      SELECT "categoryId", "categoryName", kind, SUM(total) AS total
+      FROM (
+        -- Non-split transactions: use parent category/amount
+        SELECT
+          t.category_id     AS "categoryId",
+          c.name            AS "categoryName",
+          c.kind            AS kind,
+          SUM(t.amount)     AS total
+        FROM transactions t
+        LEFT JOIN categories c ON c.id = t.category_id
+        WHERE t.business_id = ?
+          AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.transaction_id = t.id)
+          AND (c.kind IS NULL OR c.kind != 'transfer') ${yearClause}
+        GROUP BY t.category_id, c.name, c.kind
+
+        UNION ALL
+
+        -- Split transactions: each split line contributes to its own category
+        SELECT
+          ts.category_id    AS "categoryId",
+          c.name            AS "categoryName",
+          c.kind            AS kind,
+          SUM(ts.amount)    AS total
+        FROM transaction_splits ts
+        JOIN transactions t ON t.id = ts.transaction_id
+        JOIN categories c ON c.id = ts.category_id
+        WHERE t.business_id = ?
+          AND c.kind != 'transfer' ${yearClause}
+        GROUP BY ts.category_id, c.name, c.kind
+      ) combined
+      GROUP BY "categoryId", "categoryName", kind
       ORDER BY total ASC
-    `, params);
+    `, [...half1, ...half2]);
     return rows.map((r) => ({
       categoryId: r.categoryId as number | null,
       categoryName: r.categoryName as string | null,
@@ -192,7 +227,7 @@ export class TransactionRepoImpl implements TransactionRepo {
 
   async reportCashflow(year?: number): Promise<CashflowRow[]> {
     const yearClause = year ? "AND substr(t.date, 1, 4) = ?" : '';
-    const params: unknown[] = [this.userId];
+    const params: unknown[] = [this.businessId];
     if (year) params.push(String(year));
     const rows = await this.db.all(`
       SELECT
@@ -202,7 +237,7 @@ export class TransactionRepoImpl implements TransactionRepo {
         SUM(t.amount) AS net
       FROM transactions t
       LEFT JOIN categories c ON c.id = t.category_id
-      WHERE t.user_id = ? AND (c.kind IS NULL OR c.kind != 'transfer') ${yearClause}
+      WHERE t.business_id = ? AND (c.kind IS NULL OR c.kind != 'transfer') ${yearClause}
       GROUP BY period
       ORDER BY period ASC
     `, params);
@@ -212,5 +247,45 @@ export class TransactionRepoImpl implements TransactionRepo {
       expenses: Number(r.expenses),
       net: Number(r.net),
     }));
+  }
+
+  async getSplits(transactionId: number): Promise<TransactionSplit[]> {
+    const rows = await this.db.all(
+      `SELECT ts.* FROM transaction_splits ts
+       JOIN transactions t ON t.id = ts.transaction_id
+       WHERE ts.transaction_id = ? AND t.business_id = ?
+       ORDER BY ts.id ASC`,
+      [transactionId, this.businessId],
+    );
+    return rows.map((r) => ({
+      id: r.id as number,
+      transactionId: r.transaction_id as number,
+      categoryId: r.category_id as number,
+      amount: Number(r.amount),
+      note: r.note as string | null,
+    }));
+  }
+
+  async replaceSplits(
+    transactionId: number,
+    splits: Array<{ categoryId: number; amount: number; note?: string | null }>,
+  ): Promise<TransactionSplit[]> {
+    // Verify the transaction belongs to this user before touching splits.
+    const tx = await this.findById(transactionId);
+    if (!tx) throw new Error('Transaction not found');
+
+    await this.db.transaction(async (trx) => {
+      await trx.run('DELETE FROM transaction_splits WHERE transaction_id = ?', [transactionId]);
+      const now = new Date().toISOString();
+      for (const s of splits) {
+        await trx.run(
+          `INSERT INTO transaction_splits (transaction_id, category_id, amount, note, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [transactionId, s.categoryId, s.amount, s.note ?? null, now],
+        );
+      }
+    });
+
+    return this.getSplits(transactionId);
   }
 }

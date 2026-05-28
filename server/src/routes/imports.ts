@@ -1,15 +1,35 @@
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import pdfParse from 'pdf-parse';
 import { findTemplateParser } from '../parsers';
+import { isLlmConfigured } from '../llm/client';
 import { extractPositionedText, groupByLine } from '../parsers/pdfPositional';
 import { inspectCsv } from '../parsers/csv';
+import { redactText } from '../parsers/redact';
+import { UnknownFormatSampleRepoImpl } from '../repos/impl/UnknownFormatSampleRepoImpl';
+import { DuplicateSampleError } from '../repos/UnknownFormatSampleRepo';
 import { CsvColumnMapping } from '@keepmyledger/shared';
+import type { DbAdapter } from '../db/adapter';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'data', 'uploads');
+
+// Per-type file size limits. Multer enforces the max; validateUpload enforces per-type.
+const SIZE_LIMIT_PDF = 25 * 1024 * 1024;  // 25 MB
+const SIZE_LIMIT_TEXT = 5 * 1024 * 1024;  // 5 MB (CSV / TSV / QIF)
+
+// Tighter rate limit for upload endpoints — parsing is expensive.
+// Authenticated requests only (requireUser runs before this router).
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many uploads, please try again later.' },
+});
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -20,32 +40,81 @@ const upload = multer({
       cb(null, `${id}${ext}`);
     },
   }),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: SIZE_LIMIT_PDF }, // outer ceiling; per-type enforced in validateUpload
   fileFilter: (_req, file, cb) => {
     if (pickExt(file)) cb(null, true);
-    else cb(new Error('Only PDF, CSV, and QIF files are accepted'));
+    else cb(new Error('Only PDF, CSV, QIF, and OFX/QFX files are accepted'));
   },
 });
 
-function pickExt(file: Express.Multer.File): '.pdf' | '.csv' | '.tsv' | '.qif' | '' {
+function pickExt(file: Express.Multer.File): '.pdf' | '.csv' | '.tsv' | '.qif' | '.ofx' | '.qfx' | '' {
   const name = file.originalname.toLowerCase();
   if (file.mimetype === 'application/pdf' || name.endsWith('.pdf')) return '.pdf';
   if (name.endsWith('.qif')) return '.qif';
+  if (name.endsWith('.ofx')) return '.ofx';
+  if (name.endsWith('.qfx')) return '.qfx';
   if (name.endsWith('.tsv')) return '.tsv';
   if (file.mimetype === 'text/csv' || file.mimetype === 'application/vnd.ms-excel' || name.endsWith('.csv')) return '.csv';
   return '';
 }
 
-function fileKindFromToken(token: string): 'pdf' | 'csv' | 'qif' {
+/**
+ * Validate an already-written upload file.
+ * Enforces per-type size limits and magic-byte checks so a renamed binary
+ * can't slip through the mimetype/extension allowlist.
+ * Throws with a user-facing message on failure.
+ */
+function validateUpload(filePath: string, ext: string): void {
+  const stat = fs.statSync(filePath);
+  const isPdf = ext === '.pdf';
+  const sizeLimit = isPdf ? SIZE_LIMIT_PDF : SIZE_LIMIT_TEXT;
+  if (stat.size > sizeLimit) {
+    const mb = Math.round(sizeLimit / 1024 / 1024);
+    throw new Error(`File too large: ${ext.slice(1).toUpperCase()} files must be under ${mb} MB`);
+  }
+
+  // Read enough bytes for magic-byte checks (256 covers OFX 1.x header lines).
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(256);
+  const bytesRead = fs.readSync(fd, buf, 0, 256, 0);
+  fs.closeSync(fd);
+  const head = buf.slice(0, bytesRead);
+
+  if (isPdf) {
+    // PDF files must begin with %PDF-
+    if (!head.slice(0, 5).equals(Buffer.from('%PDF-'))) {
+      throw new Error('File does not appear to be a valid PDF (missing %PDF- header)');
+    }
+  } else if (ext === '.qif') {
+    // QIF files must begin with !Type:
+    if (!head.toString('ascii').startsWith('!Type:')) {
+      throw new Error('File does not appear to be a valid QIF (missing !Type: header)');
+    }
+  } else if (ext === '.ofx' || ext === '.qfx') {
+    // OFX 1.x: starts with "OFXHEADER:" header block; OFX 2.x: contains "<OFX>" tag.
+    const headLower = head.toString('ascii').toLowerCase();
+    if (!headLower.includes('ofxheader:') && !headLower.includes('<ofx')) {
+      throw new Error('File does not appear to be a valid OFX (missing OFX header)');
+    }
+  } else {
+    // CSV / TSV: must be valid text — reject if null bytes appear in the first 256 bytes.
+    if (head.includes(0x00)) {
+      throw new Error('File does not appear to be a valid CSV (binary content detected)');
+    }
+  }
+}
+
+function fileKindFromToken(token: string): 'pdf' | 'csv' | 'qif' | 'ofx' {
   if (token.endsWith('.pdf')) return 'pdf';
   if (token.endsWith('.qif')) return 'qif';
+  if (token.endsWith('.ofx') || token.endsWith('.qfx')) return 'ofx';
   if (token.endsWith('.csv') || token.endsWith('.tsv')) return 'csv';
   throw new Error('Unknown file type');
 }
 
 /** Resolve a preview token to a real on-disk path, guarding against traversal. */
 function resolveToken(token: unknown): string {
-  if (typeof token !== 'string' || !/^[a-f0-9]{24}\.(pdf|csv|tsv|qif)$/i.test(token)) {
+  if (typeof token !== 'string' || !/^[a-f0-9]{24}\.(pdf|csv|tsv|qif|ofx|qfx)$/i.test(token)) {
     throw new Error('Invalid preview token');
   }
   const full = path.join(UPLOAD_DIR, token);
@@ -70,7 +139,7 @@ function reapOldUploads(): void {
   } catch { /* ignore */ }
 }
 
-export function importsRouter(): Router {
+export function importsRouter(db: DbAdapter): Router {
   const router = Router();
   // Run the reaper every 15 minutes, plus once at startup
   reapOldUploads();
@@ -81,20 +150,22 @@ export function importsRouter(): Router {
 
   /**
    * POST /api/imports/preview
-   * multipart: file (required), accountId (optional — used to seed CSV mapping)
+   * multipart: file (required), accountId (optional, used to seed CSV mapping)
    * returns: { token, kind, parsed, sampleRows?, header?, delimiter?, hasHeader? }
    */
-  router.post('/preview', upload.single('file'), async (req: Request, res: Response) => {
+  router.post('/preview', uploadLimiter, upload.single('file'), async (req: Request, res: Response) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const token = path.basename(req.file.path);
+    const ext = path.extname(req.file.path);
     try {
+      validateUpload(req.file.path, ext);
       const kind = fileKindFromToken(token);
       const accountId = req.body?.accountId ? Number(req.body.accountId) : null;
       const services = req.ctx!.services.imports;
 
       if (kind === 'pdf') {
         const parsed = await services.previewPdf(req.file.path);
-        return res.json({ token, kind, parsed });
+        return res.json({ token, kind, parsed, llmAvailable: isLlmConfigured() });
       }
 
       if (kind === 'qif') {
@@ -102,6 +173,17 @@ export function importsRouter(): Router {
         let parseError: string | null = null;
         try {
           parsed = await services.previewQif(req.file.path);
+        } catch (err) {
+          parseError = err instanceof Error ? err.message : String(err);
+        }
+        return res.json({ token, kind, parsed, parseError });
+      }
+
+      if (kind === 'ofx') {
+        let parsed = null;
+        let parseError: string | null = null;
+        try {
+          parsed = await services.previewOfx(req.file.path);
         } catch (err) {
           parseError = err instanceof Error ? err.message : String(err);
         }
@@ -173,6 +255,8 @@ export function importsRouter(): Router {
         result = await services.importCsv(Number(accountId), filePath, mapping ?? undefined);
       } else if (kind === 'qif') {
         result = await services.importQif(Number(accountId), filePath);
+      } else if (kind === 'ofx') {
+        result = await services.importOfx(Number(accountId), filePath);
       } else {
         result = await services.importPdf(Number(accountId), filePath);
       }
@@ -187,6 +271,32 @@ export function importsRouter(): Router {
       res.status(422).json({ error: msg });
     } finally {
       try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+    }
+  });
+
+  /**
+   * POST /api/imports/duplicates/resolve
+   * body: { statementId, decisions: Array<{ externalHash, action: 'keep' | 'skip',
+   *         date, description, amount }> }
+   * Returns: { inserted, transactions }
+   *
+   * Called after the user reviews the cross-import duplicate list returned in
+   * ImportResult.pendingReview. Rows with `action: 'keep'` are inserted; skips
+   * are silently discarded.
+   */
+  router.post('/duplicates/resolve', async (req: Request, res: Response) => {
+    const { statementId, decisions } = req.body ?? {};
+    if (!Number.isInteger(statementId)) return res.status(400).json({ error: 'statementId must be an integer' });
+    if (!Array.isArray(decisions)) return res.status(400).json({ error: 'decisions must be an array' });
+    try {
+      const result = await req.ctx!.services.imports.resolveDuplicates(
+        Number(statementId),
+        decisions as Parameters<NonNullable<typeof req.ctx>['services']['imports']['resolveDuplicates']>[1],
+      );
+      res.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(422).json({ error: msg });
     }
   });
 
@@ -236,7 +346,44 @@ export function importsRouter(): Router {
     }
   });
 
-  /** Abandon a preview without committing — frees the temp file. */
+  /**
+   * POST /api/imports/preview/:token/enhance-llm
+   * Re-parses the already-uploaded PDF using the LLM.
+   * Only called after the user explicitly consents in the UI.
+   */
+  router.post('/preview/:token/enhance-llm', async (req: Request, res: Response) => {
+    let filePath: string;
+    try {
+      filePath = resolveToken(req.params.token);
+    } catch (err) {
+      return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+    const kind = fileKindFromToken(req.params.token);
+    if (kind !== 'pdf') return res.status(400).json({ error: 'LLM enhancement only supported for PDF' });
+    if (!isLlmConfigured()) return res.status(503).json({ error: 'LLM not configured on this server' });
+
+    // Optional accountId in the body lets the parser pin the sign convention to
+    // the account's kind (credit_card vs checking/savings).
+    let accountKind;
+    const rawAccountId = req.body?.accountId;
+    if (rawAccountId !== undefined && rawAccountId !== null) {
+      const id = Number(rawAccountId);
+      if (Number.isInteger(id) && id > 0) {
+        const account = await req.ctx!.repos.accounts.findById(id);
+        if (account) accountKind = account.accountKind;
+      }
+    }
+
+    try {
+      const parsed = await req.ctx!.services.imports.previewPdfWithLlm(filePath, accountKind);
+      res.json({ token: req.params.token, kind, parsed, llmAvailable: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(422).json({ error: msg });
+    }
+  });
+
+  /** Abandon a preview without committing; frees the temp file. */
   router.delete('/preview/:token', (req: Request, res: Response) => {
     try {
       const filePath = resolveToken(req.params.token);
@@ -244,6 +391,78 @@ export function importsRouter(): Router {
       res.status(204).end();
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ── Unknown-format sample reporting ───────────────────────────────────────
+
+  /**
+   * POST /api/imports/report-unknown
+   * json: { token, bankHint?, accountId? }
+   * Reads the already-uploaded PDF, redacts PII, and saves a sample row so
+   * admins can use it to add parser support for new statement formats.
+   *
+   * Rate-limited via uploadLimiter; deduplicated by preview token so a single
+   * preview can only generate one sample row.
+   */
+  router.post('/report-unknown', uploadLimiter, async (req: Request, res: Response) => {
+    const { token, bankHint, accountId: bodyAccountId } = req.body ?? {};
+    let filePath: string;
+    try {
+      filePath = resolveToken(token);
+    } catch (err) {
+      return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+    const kind = fileKindFromToken(token as string);
+    if (kind !== 'pdf') return res.status(400).json({ error: 'Only PDF samples can be reported' });
+
+    // Validate that any supplied accountId belongs to the user's business.
+    // Invalid IDs are silently dropped — the sample is still useful without one.
+    let accountId: number | null = null;
+    if (bodyAccountId !== undefined && bodyAccountId !== null) {
+      const candidate = Number(bodyAccountId);
+      if (Number.isInteger(candidate) && candidate > 0) {
+        const acct = await req.ctx!.repos.accounts.findById(candidate);
+        if (acct) accountId = candidate;
+      }
+    }
+
+    // Cap the bank hint at 100 chars to keep the admin queue tidy.
+    const hint = typeof bankHint === 'string' && bankHint.trim()
+      ? bankHint.trim().slice(0, 100)
+      : null;
+
+    try {
+      const buffer = fs.readFileSync(filePath);
+      const stat = fs.statSync(filePath);
+      let text = '';
+      let pageCount: number | null = null;
+      try {
+        const pdfData = await pdfParse(buffer);
+        text = pdfData.text;
+        pageCount = pdfData.numpages;
+      } catch {
+        // Even if parse fails, still record the sample with empty text
+      }
+
+      const repo = new UnknownFormatSampleRepoImpl(db);
+      const sample = await repo.create({
+        orgId: req.ctx!.orgId,
+        accountId,
+        redactedText: redactText(text),
+        bankHint: hint,
+        pageCount,
+        fileSizeKb: Math.ceil(stat.size / 1024),
+        previewToken: token as string,
+      });
+
+      res.status(201).json({ id: sample.id });
+    } catch (err) {
+      if (err instanceof DuplicateSampleError) {
+        return res.status(409).json({ error: 'A sample has already been submitted for this preview.' });
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -294,7 +513,7 @@ export function importsRouter(): Router {
 
   // ── One-shot import (back-compat) ──────────────────────────────────────
 
-  router.post('/', upload.single('file'), async (req: Request, res: Response) => {
+  router.post('/', uploadLimiter, upload.single('file'), async (req: Request, res: Response) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const accountId = Number(req.body?.accountId);
@@ -304,12 +523,15 @@ export function importsRouter(): Router {
     }
 
     try {
+      validateUpload(req.file.path, path.extname(req.file.path));
       const kind = fileKindFromToken(path.basename(req.file.path));
       let result;
       if (kind === 'csv') {
         result = await req.ctx!.services.imports.importCsv(accountId, req.file.path);
       } else if (kind === 'qif') {
         result = await req.ctx!.services.imports.importQif(accountId, req.file.path);
+      } else if (kind === 'ofx') {
+        result = await req.ctx!.services.imports.importOfx(accountId, req.file.path);
       } else {
         result = await req.ctx!.services.imports.importPdf(accountId, req.file.path);
       }

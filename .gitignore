@@ -5,3 +5,10 @@ data/
 .env
 uploads/
 *.swp
+*.tgz
+.DS_Store
+
+# Brand/legal/SEO local overrides — fork operators create these; they must not
+# reach the OSS mirror. The *.template.* counterparts ARE committed.
+web/src/content/**/*.local.*
+web/public/*.local.*

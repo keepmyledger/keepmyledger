@@ -1,10 +1,12 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { getAppMode } from '../auth/context';
+import { isStripeConfigured } from '../services/stripeService';
 
 /**
  * Middleware that gates write/import/AI routes on an active subscription.
  *
  * - Self-host: always allows (short-circuits immediately).
+ * - SaaS, Stripe not configured (dark-launch / pre-billing): always allows.
  * - SaaS, no subscription row: 402 (trial not provisioned; shouldn't happen
  *   after first-login provisioning, but defensive).
  * - SaaS, status trialing/active: allows.
@@ -18,6 +20,14 @@ export function requireActiveSubscription(): RequestHandler {
       try {
         // Self-host is always allowed.
         if (getAppMode() !== 'saas') {
+          next();
+          return;
+        }
+
+        // Dark-launch: until Stripe is configured, billing is invisible to
+        // users and trials don't expire. Subscribe button shows "Billing
+        // launches soon" — see web/src/pages/Billing.tsx + TrialBanner.tsx.
+        if (!isStripeConfigured()) {
           next();
           return;
         }

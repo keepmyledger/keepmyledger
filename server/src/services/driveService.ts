@@ -3,18 +3,25 @@ import { OAuth2Client, Credentials } from 'google-auth-library';
 import type { DbAdapter } from '../db/adapter';
 import type { CreateReceiptFromDrivePayload } from '@keepmyledger/shared';
 import { Readable } from 'stream';
+import { encrypt, decrypt } from '../auth/crypto';
 
 // drive.file = app may only see/manage files it created or the user explicitly
 // opened with it. This is the least-privilege scope; no listing of unrelated
 // Drive content. Sufficient for "upload a receipt to my own Drive".
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 const REDIRECT_PATH = '/api/receipts/drive/callback';
-const FOLDER_NAME = 'Receipts';
+const FOLDER_NAME = 'KeepMyLedger Receipts';
 
 interface TokenRow {
   user_id: string;
-  tokens_json: string;
+  tokens_json_enc: string | null;
   folder_id: string | null;
+}
+
+/** Return the decrypted token JSON string from a DB row. */
+function readTokens(row: TokenRow): string {
+  if (row.tokens_json_enc != null) return decrypt(row.tokens_json_enc);
+  throw new Error('[drive] token row has no token data');
 }
 
 /**
@@ -111,7 +118,7 @@ export class DriveService {
     const row = await this.loadRow(userId);
     if (!row) throw new Error('Google Drive is not connected for this user');
     const client = this.newOAuthClient();
-    client.setCredentials(JSON.parse(row.tokens_json) as Credentials);
+    client.setCredentials(JSON.parse(readTokens(row)) as Credentials);
     client.on('tokens', (newTokens) => {
       void this.mergeTokens(userId, newTokens)
         .then((merged) => this.saveTokens(userId, merged))
@@ -122,27 +129,29 @@ export class DriveService {
 
   private async loadRow(userId: string): Promise<TokenRow | undefined> {
     return this.db.get<TokenRow>(
-      'SELECT user_id, tokens_json, folder_id FROM user_drive_tokens WHERE user_id = ?',
+      'SELECT user_id, tokens_json_enc, folder_id FROM user_drive_tokens WHERE user_id = ?',
       [userId],
     );
   }
 
   private async mergeTokens(userId: string, fresh: Credentials): Promise<Credentials> {
     const existing = await this.loadRow(userId);
-    const prior: Credentials = existing ? (JSON.parse(existing.tokens_json) as Credentials) : {};
+    const prior: Credentials = existing ? (JSON.parse(readTokens(existing)) as Credentials) : {};
     return {
       ...prior,
       ...fresh,
-      // refresh_token is only sent on first consent — keep the old one if absent.
+      // refresh_token is only sent on first consent, so keep the old one if absent.
       refresh_token: fresh.refresh_token ?? prior.refresh_token,
     };
   }
 
   private async saveTokens(userId: string, tokens: Credentials): Promise<void> {
+    const tokensJsonEnc = encrypt(JSON.stringify(tokens));
     await this.db.run(
-      `INSERT INTO user_drive_tokens(user_id, tokens_json) VALUES (?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET tokens_json = excluded.tokens_json`,
-      [userId, JSON.stringify(tokens)],
+      `INSERT INTO user_drive_tokens(user_id, tokens_json_enc) VALUES (?, ?)
+       ON CONFLICT(user_id) DO UPDATE
+         SET tokens_json_enc = excluded.tokens_json_enc`,
+      [userId, tokensJsonEnc],
     );
   }
 

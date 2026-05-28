@@ -3,10 +3,16 @@
  * enforced by the `/api/transactions/:id/ai-suggest` endpoint.
  *
  * The "day" key is a UTC YYYY-MM-DD string so counts reset at 00:00 UTC.
+ *
+ * `getLifetimeCount` sums all days for the user; used for the free-tier
+ * lifetime cap (5 calls total, not per day).
  */
 export interface AiUsageRepo {
   /** Returns the current count for today (UTC), or 0 if no row yet. */
   getTodayCount(): Promise<number>;
+
+  /** Returns the total count across all days for this user. */
+  getLifetimeCount(): Promise<number>;
 
   /**
    * Atomically increments today's counter (upserting a row if needed) and

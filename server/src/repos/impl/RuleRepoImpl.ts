@@ -19,15 +19,15 @@ function toRule(row: Record<string, unknown>): Rule {
 }
 
 export class RuleRepoImpl implements RuleRepo {
-  constructor(private db: DbAdapter, private userId: string) {}
+  constructor(private db: DbAdapter, private businessId: number) {}
 
   async findAll(): Promise<Rule[]> {
-    const rows = await this.db.all('SELECT * FROM rules WHERE user_id = ? ORDER BY priority DESC, id', [this.userId]);
+    const rows = await this.db.all('SELECT * FROM rules WHERE business_id = ? ORDER BY priority DESC, id', [this.businessId]);
     return rows.map(toRule);
   }
 
   async findById(id: number): Promise<Rule | undefined> {
-    const row = await this.db.get('SELECT * FROM rules WHERE id = ? AND user_id = ?', [id, this.userId]);
+    const row = await this.db.get('SELECT * FROM rules WHERE id = ? AND business_id = ?', [id, this.businessId]);
     return row ? toRule(row) : undefined;
   }
 
@@ -37,10 +37,10 @@ export class RuleRepoImpl implements RuleRepo {
 
   async create(payload: CreateRulePayload): Promise<Rule> {
     const row = await this.db.get<{ id: number }>(
-      `INSERT INTO rules(user_id, name, description_pattern, pattern_kind, amount_min, amount_max, account_id, category_id, priority, tax_description)
+      `INSERT INTO rules(business_id, name, description_pattern, pattern_kind, amount_min, amount_max, account_id, category_id, priority, tax_description)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       [
-        this.userId,
+        this.businessId,
         payload.name,
         payload.descriptionPattern,
         payload.patternKind,
@@ -70,14 +70,14 @@ export class RuleRepoImpl implements RuleRepo {
     if (entries.length === 0) return this.findById(id);
     const setClause = entries.map(([k]) => `${k} = ?`).join(', ');
     await this.db.run(
-      `UPDATE rules SET ${setClause} WHERE id = ? AND user_id = ?`,
-      [...entries.map(([, v]) => v), id, this.userId],
+      `UPDATE rules SET ${setClause} WHERE id = ? AND business_id = ?`,
+      [...entries.map(([, v]) => v), id, this.businessId],
     );
     return this.findById(id);
   }
 
   async delete(id: number): Promise<boolean> {
-    const result = await this.db.run('DELETE FROM rules WHERE id = ? AND user_id = ?', [id, this.userId]);
+    const result = await this.db.run('DELETE FROM rules WHERE id = ? AND business_id = ?', [id, this.businessId]);
     return result.changes > 0;
   }
 }

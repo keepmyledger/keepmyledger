@@ -4,10 +4,10 @@
  * Handles the most common QIF structures exported by US banks and personal
  * finance apps:
  *
- *   !Type:Bank  — checking / savings
- *   !Type:CCard — credit card
- *   !Type:Oth L — other / liability (treated as bank)
- *   !Type:Cash  — cash accounts (treated as bank)
+ *   !Type:Bank  - checking / savings
+ *   !Type:CCard - credit card
+ *   !Type:Oth L - other / liability (treated as bank)
+ *   !Type:Cash  - cash accounts (treated as bank)
  *
  * Per-transaction fields used:
  *   D  Date
@@ -78,7 +78,7 @@ export function parseQif(rawText: string): ParseQifResult {
     const value = line.slice(1).trim();
 
     if (code === '!') {
-      // Type header — commit any open record first
+      // Type header; commit any open record first
       commitRecord();
       accountType = detectAccountType(value);
       continue;
@@ -107,7 +107,7 @@ export function parseQif(rawText: string): ParseQifResult {
       case 'M':
         memo = value;
         break;
-      // N (check number), C (cleared), L (category), $ (split) — ignored
+      // N (check number), C (cleared), L (category), $ (split): ignored
     }
   }
 

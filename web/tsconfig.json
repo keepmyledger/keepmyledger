@@ -14,7 +14,16 @@
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@content/brand/config": ["src/content/brand/config.template.ts"],
+      "@content/marketing/about": ["src/content/marketing/about.template.ts"],
+      "@content/cookies/consent": ["src/content/cookies/consent.template.ts"],
+      "@content/seo/prerender-routes": ["src/content/seo/prerender-routes.template.ts"],
+      "@content/legal/privacy-content": ["src/content/legal/privacy-content.template.tsx"],
+      "@content/legal/terms-content": ["src/content/legal/terms-content.template.tsx"]
+    }
   },
   "include": ["src"]
 }

@@ -1,5 +1,5 @@
 /**
- * PG smoke test — runs the same repo CRUD operations against the live
+ * PG smoke test: runs the same repo CRUD operations against the live
  * Postgres container to prove the DbAdapter abstraction works on both
  * backends. Not part of the jest suite (requires Docker pg up).
  *
@@ -29,9 +29,9 @@ async function main(): Promise<void> {
   if (owner.id !== OWNER_USER_ID) throw new Error('owner id mismatch');
 
   const alt = await userRepo.create({ email: 'pg-smoke@example.com', name: 'Smoke' });
-  await userRepo.provisionDefaults(alt.id);
+  const { orgId: altOrgId, businessId: altBusinessId } = await userRepo.provisionDefaults(alt.id);
 
-  const repos = createRepos(db, alt.id);
+  const repos = createRepos(db, alt.id, altOrgId, altBusinessId);
   const acct = await repos.accounts.create({ name: 'PG Smoke Checking', bankType: 'mt', accountKind: 'checking' });
   const stmt = await repos.statements.create({ accountId: acct.id, period: '2026-05', sourcePdfPath: '/tmp/x.pdf', parserUsed: 'template' });
   const cat = (await repos.categories.findAll())[0];
@@ -45,13 +45,10 @@ async function main(): Promise<void> {
   ]);
   if (result.inserted !== 2) throw new Error(`expected 2 inserts, got ${result.inserted}`);
 
-  // re-run for dedup
-  const dup = await repos.transactions.bulkCreate([
-    { accountId: acct.id, statementId: stmt.id, date: '2026-05-01', description: 'TEST DEBIT', amount: -42.5,
-      categoryId: cat.id, categorySource: 'manual', suggestedCategoryId: null, ruleId: null, notes: null,
-      taxDescription: null, externalHash: 'pg-smoke-hash-1' } as never,
-  ]);
-  if (dup.inserted !== 0 || dup.skipped !== 1) throw new Error(`dedup failed: ${JSON.stringify(dup)}`);
+  // findExistingHashes: the SELECT-based dedup primitive used by importService.
+  const present = await repos.transactions.findExistingHashes(acct.id, ['pg-smoke-hash-1', 'no-such-hash']);
+  if (!present.has('pg-smoke-hash-1')) throw new Error('findExistingHashes missed a present hash');
+  if (present.has('no-such-hash')) throw new Error('findExistingHashes claimed a missing hash was present');
 
   const all = await repos.transactions.findAll();
   if (all.length !== 2) throw new Error(`expected 2 txns, got ${all.length}`);
@@ -64,7 +61,8 @@ async function main(): Promise<void> {
   if (Math.abs(cashflow[0].net - 57.5) > 0.001) throw new Error(`cashflow net mismatch: ${cashflow[0].net}`);
 
   // Tenant isolation: owner repos shouldn't see alt's account
-  const ownerRepos = createRepos(db, OWNER_USER_ID);
+  const { orgId: ownerOrgId, businessId: ownerBusinessId } = await userRepo.provisionDefaults(OWNER_USER_ID);
+  const ownerRepos = createRepos(db, OWNER_USER_ID, ownerOrgId, ownerBusinessId);
   const ownerAccts = await ownerRepos.accounts.findAll();
   if (ownerAccts.find((a) => a.id === acct.id)) throw new Error('tenant leak');
 
@@ -73,7 +71,7 @@ async function main(): Promise<void> {
     owner: owner.id,
     alt: alt.id,
     inserted: result.inserted,
-    deduped: dup.skipped,
+    hashLookupHit: present.has('pg-smoke-hash-1'),
     txCount: all.length,
     byCatRows: byCat.length,
     cashflowRows: cashflow.length,

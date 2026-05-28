@@ -3,16 +3,91 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#1E293B" />
+    <meta name="theme-color" content="#1F5C4A" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Expenses" />
+    <!--
+      CUSTOMIZE: Update the meta tags below (title, description, canonical URL,
+      OG image, Twitter handle) to match your deployment. These are used as
+      fallback values for the SPA shell and as the base for prerendered routes.
+      The JSON-LD structured data below should also reflect your organization.
+    -->
+    <meta name="apple-mobile-web-app-title" content="Your App" />
+
+    <!-- SEO -->
+    <meta name="description" content="Privacy-first bookkeeping for individuals and small businesses. Import bank statements, auto-categorize with smart rules and AI, and get tax-ready reports without handing your data to anyone." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://example.com/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:url"         content="https://example.com/" />
+    <meta property="og:site_name"   content="Your App" />
+    <meta property="og:title"       content="Your App: Privacy-first bookkeeping" />
+    <meta property="og:description" content="Import bank statements, let smart rules and AI categorize transactions, and get tax-ready reports. No bank logins stored. No data resale. Private by design." />
+    <meta property="og:image"       content="https://example.com/og-image.png" />
+    <meta property="og:image:width"  content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card"        content="summary_large_image" />
+    <meta name="twitter:title"       content="Your App: Privacy-first bookkeeping" />
+    <meta name="twitter:description" content="Privacy-first bookkeeping. Import statements, auto-categorize, export tax reports. No bank credentials, no data resale." />
+    <meta name="twitter:image"       content="https://example.com/og-image.png" />
+
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>KeepMyLedger</title>
+    <title>Your App: Privacy-first bookkeeping</title>
+
+    <!--
+      Structured data (JSON-LD) for SEO / AEO. Update the values below to match
+      your organization. Per-route JSON-LD (FAQPage, etc.) is injected by
+      web/scripts/prerender.ts into the static dist/<route>/index.html files.
+    -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Your App",
+      "url": "https://example.com",
+      "logo": "https://example.com/favicon.svg",
+      "description": "Privacy-first bookkeeping for individuals and small businesses. Import bank statements, categorize with smart rules and AI, and get tax-ready reports.",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "email": "support@example.com",
+        "contactType": "customer support"
+      },
+      "sameAs": []
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Your App",
+      "url": "https://example.com",
+      "applicationCategory": "FinanceApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "description": "Free during beta"
+      },
+      "description": "Import bank statements, let smart rules and AI categorize transactions, and get tax-ready reports. No bank logins stored. No data resale. Private by design.",
+      "featureList": [
+        "Bank statement import (PDF and CSV)",
+        "Automatic transaction categorization with rules",
+        "AI-assisted categorization",
+        "Tax-ready reports and CSV export",
+        "Receipt attachments with optional Google Drive sync",
+        "Privacy-first: no bank credentials stored"
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>

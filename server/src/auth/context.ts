@@ -1,5 +1,5 @@
 import { AppMode } from '@keepmyledger/shared';
-import { Repos, createRepos, createUserRepo, OWNER_USER_ID } from '../repos/impl';
+import { Repos, createRepos, createUserRepo, createGlobalSubscriptionRepo, OWNER_USER_ID } from '../repos/impl';
 import { UserRepo } from '../repos/UserRepo';
 import { DbAdapter } from '../db/adapter';
 import { CategorizationService } from '../services/categorizationService';
@@ -17,13 +17,22 @@ export interface RequestServices {
 
 export interface RequestContext {
   userId: string;
+  orgId: string;
+  businessId: number;
+  role: 'owner' | 'member';
   repos: Repos;
   services: RequestServices;
 }
 
-/** Build all per-request repo + service instances bound to one userId. */
-export function buildContext(db: DbAdapter, userId: string): RequestContext {
-  const repos = createRepos(db, userId);
+/** Build all per-request repo + service instances bound to one userId/org/business. */
+export function buildContext(
+  db: DbAdapter,
+  userId: string,
+  orgId: string,
+  businessId: number,
+  role: 'owner' | 'member' = 'owner',
+): RequestContext {
+  const repos = createRepos(db, userId, orgId, businessId);
   const categorization = new CategorizationService(repos.rules, repos.transactions, repos.categories);
   const llmBankHintRepo = new LlmBankHintRepoImpl(db);
   const imports = new ImportService(repos.accounts, repos.statements, repos.transactions, categorization, llmBankHintRepo);
@@ -34,7 +43,7 @@ export function buildContext(db: DbAdapter, userId: string): RequestContext {
     rules: repos.rules,
     accounts: repos.accounts,
   });
-  return { userId, repos, services: { categorization, imports, tracking, aiAssist } };
+  return { userId, orgId, businessId, role, repos, services: { categorization, imports, tracking, aiAssist } };
 }
 
 export function getAppMode(): AppMode {
@@ -62,5 +71,8 @@ export function getAiDailyLimit(): number {
 export function getUserRepo(db: DbAdapter): UserRepo {
   return createUserRepo(db);
 }
+
+/** Subscription repo for Stripe webhook handlers (no org scope). */
+export { createGlobalSubscriptionRepo };
 
 export { OWNER_USER_ID };

@@ -3,7 +3,7 @@
  *
  *   node --experimental-sqlite dist/scripts/sqliteToPg.js [--reset]
  *
- * Reads the sqlite DB at DB_PATH (defaults to data/expense-tracker.db) and
+ * Reads the sqlite DB at DB_PATH (defaults to data/keepmyledger.db) and
  * copies every row into the Postgres instance pointed at by DATABASE_URL,
  * preserving primary keys. Sequences are rewound so future inserts continue
  * from MAX(id) + 1.
@@ -16,7 +16,7 @@
  *   users → user_identities → accounts → categories → statements
  *   → rules → transactions → receipts → transaction_receipts
  *
- * category_templates is *not* touched — it is seeded by the PG schema and
+ * category_templates is *not* touched; it is seeded by the PG schema and
  * never referenced by sqlite. The owner's per-user `categories` rows are
  * copied verbatim from sqlite, which means the seeded owner categories
  * created by 001_init.sql in PG will be replaced wholesale.
@@ -50,7 +50,7 @@ const SEQUENCE_TABLES = [
 
 function dbPath(): string {
   if (process.env.DB_PATH) return process.env.DB_PATH;
-  return path.join(process.cwd(), 'data', 'expense-tracker.db');
+  return path.join(process.cwd(), 'data', 'keepmyledger.db');
 }
 
 async function main(): Promise<void> {

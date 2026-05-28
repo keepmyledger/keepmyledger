@@ -24,22 +24,22 @@ function toAccount(row: Record<string, unknown>): Account {
 }
 
 export class AccountRepoImpl implements AccountRepo {
-  constructor(private db: DbAdapter, private userId: string) {}
+  constructor(private db: DbAdapter, private businessId: number) {}
 
   async findAll(): Promise<Account[]> {
-    const rows = await this.db.all('SELECT * FROM accounts WHERE user_id = ? ORDER BY name', [this.userId]);
+    const rows = await this.db.all('SELECT * FROM accounts WHERE business_id = ? ORDER BY name', [this.businessId]);
     return rows.map(toAccount);
   }
 
   async findById(id: number): Promise<Account | undefined> {
-    const row = await this.db.get('SELECT * FROM accounts WHERE id = ? AND user_id = ?', [id, this.userId]);
+    const row = await this.db.get('SELECT * FROM accounts WHERE id = ? AND business_id = ?', [id, this.businessId]);
     return row ? toAccount(row) : undefined;
   }
 
   async create(payload: CreateAccountPayload): Promise<Account> {
     const row = await this.db.get<{ id: number }>(
-      'INSERT INTO accounts(user_id, name, bank_type, account_kind) VALUES (?, ?, ?, ?) RETURNING id',
-      [this.userId, payload.name, payload.bankType, payload.accountKind],
+      'INSERT INTO accounts(business_id, name, bank_type, account_kind) VALUES (?, ?, ?, ?) RETURNING id',
+      [this.businessId, payload.name, payload.bankType, payload.accountKind],
     );
     return (await this.findById(Number(row!.id)))!;
   }
@@ -56,17 +56,17 @@ export class AccountRepoImpl implements AccountRepo {
       values.push(payload.csvMapping === null ? null : JSON.stringify(payload.csvMapping));
     }
     if (fields.length === 0) return this.findById(id);
-    values.push(id, this.userId);
-    await this.db.run(`UPDATE accounts SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`, values);
+    values.push(id, this.businessId);
+    await this.db.run(`UPDATE accounts SET ${fields.join(', ')} WHERE id = ? AND business_id = ?`, values);
     return this.findById(id);
   }
 
   async delete(id: number): Promise<boolean> {
-    const result = await this.db.run('DELETE FROM accounts WHERE id = ? AND user_id = ?', [id, this.userId]);
+    const result = await this.db.run('DELETE FROM accounts WHERE id = ? AND business_id = ?', [id, this.businessId]);
     return result.changes > 0;
   }
 
   async updateLastStatementPeriod(id: number, period: string): Promise<void> {
-    await this.db.run('UPDATE accounts SET last_statement_period = ? WHERE id = ? AND user_id = ?', [period, id, this.userId]);
+    await this.db.run('UPDATE accounts SET last_statement_period = ? WHERE id = ? AND business_id = ?', [period, id, this.businessId]);
   }
 }

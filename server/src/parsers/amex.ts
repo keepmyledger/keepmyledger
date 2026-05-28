@@ -51,7 +51,7 @@ export const amexParser: BankParser = {
 
       // Description = everything between date and amount. Drop trailing 2-letter
       // state codes (e.g. "MD", "CT") that always appear immediately before the
-      // amount, and the city before that is also noisy but harmless — keep it.
+      // amount, and the city before that is also noisy but harmless; keep it.
       const middle = line.items.slice(1, -1).map((i) => i.text);
       const description = middle.join(' ').replace(/\s+/g, ' ').trim();
       if (!description) continue;

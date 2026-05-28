@@ -10,7 +10,7 @@ export interface ParsedTransaction {
 export interface ParsedStatement {
   period: string;       // YYYY-MM
   bankType: BankType;
-  parserUsed: 'template' | 'llm' | 'csv' | 'qif';
+  parserUsed: 'template' | 'llm' | 'csv' | 'qif' | 'ofx' | 'generic';
   transactions: ParsedTransaction[];
   /** LLM-identified institution name (only set when parserUsed === 'llm'). */
   bankName?: string;
@@ -18,6 +18,10 @@ export interface ParsedStatement {
   detectedMapping?: { date: number; description: number; amount?: number; debit?: number; credit?: number };
   /** CSV-only: the delimiter character that was detected. */
   delimiter?: string;
+  /** 0..1 self-rated confidence. Omitted when the parser cannot estimate. */
+  confidence?: number;
+  /** Human-readable concerns surfaced to the user on the import preview. */
+  warnings?: string[];
 }
 
 export interface BankParser {

@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
-import { User } from '@keepmyledger/shared';
+import { User, ReceiptStoragePreference } from '@keepmyledger/shared';
 import { UserRepo, TotpRecord, CreateUserPayload, UpsertIdentityPayload } from '../UserRepo';
 import { DbAdapter } from '../../db/adapter';
 import { SubscriptionRepoImpl } from './SubscriptionRepoImpl';
+import { hashEmail } from '../../auth/emailHash';
+import { encrypt, decrypt, encryptNullable, decryptNullable } from '../../auth/crypto';
 
 export const OWNER_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -25,14 +27,23 @@ const AUTO_RULE_TEMPLATES: ReadonlyArray<{ name: string; pattern: string; catego
   { name: 'Auto: Chase redemption credit', pattern: 'REDEMPTION CREDIT', categoryName: 'Cash Back Rebate' },
 ];
 
+/** Emails (lowercased) granted admin access via ADMIN_EMAILS env var. */
+function adminEmailSet(): Set<string> {
+  const raw = process.env.ADMIN_EMAILS ?? '';
+  return new Set(raw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean));
+}
+
 function toUser(row: Record<string, unknown>): User {
+  const pref = row.receipt_storage_preference as string | null | undefined;
   return {
     id: row.id as string,
-    email: row.email as string | null,
-    name: row.name as string | null,
+    email: decryptNullable(row.email_enc as string | null),
+    name: decryptNullable(row.name_enc as string | null),
     username: (row.username as string | null) ?? null,
     avatarUrl: row.avatar_url as string | null,
+    isAdmin: !!(row.is_admin),
     createdAt: row.created_at as string,
+    receiptStoragePreference: pref === 'kml' || pref === 'drive' ? pref : null,
   };
 }
 
@@ -45,7 +56,16 @@ export class UserRepoImpl implements UserRepo {
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
-    const row = await this.db.get('SELECT * FROM users WHERE email = ?', [email]);
+    // Delegate to hash-based lookup so this works both before and after
+    // email column encryption is fully applied.
+    return this.findByEmailCI(email);
+  }
+
+  async findByEmailCI(email: string): Promise<User | undefined> {
+    const row = await this.db.get(
+      'SELECT * FROM users WHERE email_hash = ?',
+      [hashEmail(email.toLowerCase())],
+    );
     return row ? toUser(row) : undefined;
   }
 
@@ -61,9 +81,12 @@ export class UserRepoImpl implements UserRepo {
 
   async create(payload: CreateUserPayload): Promise<User> {
     const id = payload.id ?? crypto.randomUUID();
+    const emailHash = payload.email ? hashEmail(payload.email.toLowerCase()) : null;
+    const emailEnc = encryptNullable(payload.email ?? null);
+    const nameEnc  = encryptNullable(payload.name  ?? null);
     await this.db.run(
-      'INSERT INTO users(id, email, name, avatar_url) VALUES (?, ?, ?, ?)',
-      [id, payload.email, payload.name, payload.avatarUrl ?? null],
+      'INSERT INTO users(id, email_hash, email_enc, name_enc, avatar_url) VALUES (?, ?, ?, ?, ?)',
+      [id, emailHash, emailEnc, nameEnc, payload.avatarUrl ?? null],
     );
     return (await this.findById(id))!;
   }
@@ -77,50 +100,93 @@ export class UserRepoImpl implements UserRepo {
     `, [payload.userId, payload.provider, payload.providerUserId, payload.email ?? null]);
   }
 
-  async provisionDefaults(userId: string): Promise<void> {
-    // Clone templates into the user's categories table; UNIQUE(user_id, name)
-    // makes this safely idempotent.
-    // `WHERE true` disambiguates the upsert from a join (sqlite parser rule).
+  async provisionDefaults(userId: string): Promise<{ trialEndsAt: string | null; orgId: string; businessId: number }> {
+    // ── 1. Ensure personal org exists (id = userId by convention) ────────────
+    // `created_at` is omitted so each backend uses its own DEFAULT
+    // (SQLite: datetime('now'); PG: to_char(now() AT TIME ZONE 'UTC', …)).
+    const orgId = userId;
     await this.db.run(`
-      INSERT INTO categories(user_id, name, kind, tax_export_code)
-      SELECT ?, name, kind, tax_export_code FROM category_templates WHERE true
-      ON CONFLICT (user_id, name) DO NOTHING
-    `, [userId]);
+      INSERT INTO organizations(id, name)
+      VALUES (?, 'Personal')
+      ON CONFLICT (id) DO NOTHING
+    `, [orgId]);
 
-    // Seed auto-rules for transfer/cashback detection. Each rule references one
-    // of the user's own category rows (looked up by name). Idempotent via
-    // NOT EXISTS on (user_id, name); the rules table has no UNIQUE constraint
-    // because users are free to create duplicates intentionally.
+    // ── 2. Ensure owner membership exists ───────────────────────────────────
+    await this.db.run(`
+      INSERT INTO org_memberships(org_id, user_id, role)
+      VALUES (?, ?, 'owner')
+      ON CONFLICT (org_id, user_id) DO NOTHING
+    `, [orgId, userId]);
+
+    // ── 3. Ensure personal business exists and get its id ───────────────────
+    // `created_at` omitted; backend DEFAULTs supply it (see step 1).
+    await this.db.run(`
+      INSERT INTO businesses(org_id, name)
+      SELECT ?, 'Personal'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM businesses WHERE org_id = ? AND name = 'Personal'
+      )
+    `, [orgId, orgId]);
+
+    const bizRow = await this.db.get<{ id: number }>(
+      `SELECT id FROM businesses WHERE org_id = ? AND name = 'Personal' LIMIT 1`,
+      [orgId],
+    );
+    const businessId = Number(bizRow!.id);
+
+    // ── 4. Seed categories into the business (idempotent via UNIQUE constraint) ─
+    await this.db.run(`
+      INSERT INTO categories(business_id, user_id, name, kind, tax_export_code, is_business)
+      SELECT ?, ?, name, kind, tax_export_code, is_business FROM category_templates WHERE true
+      ON CONFLICT (business_id, name) DO NOTHING
+    `, [businessId, userId]);
+
+    // ── 5. Seed auto-rules for transfer/cashback detection ──────────────────
     for (const r of AUTO_RULE_TEMPLATES) {
       await this.db.run(`
-        INSERT INTO rules(user_id, name, description_pattern, pattern_kind, category_id, priority)
-        SELECT ?, ?, ?, 'substring', c.id, 100
+        INSERT INTO rules(business_id, user_id, name, description_pattern, pattern_kind, category_id, priority)
+        SELECT ?, ?, ?, ?, 'substring', c.id, 100
         FROM categories c
-        WHERE c.user_id = ? AND c.name = ?
+        WHERE c.business_id = ? AND c.name = ?
           AND NOT EXISTS (
             SELECT 1 FROM rules existing
-            WHERE existing.user_id = ? AND existing.name = ?
+            WHERE existing.business_id = ? AND existing.name = ?
           )
-      `, [userId, r.name, r.pattern, userId, r.categoryName, userId, r.name]);
+      `, [businessId, userId, r.name, r.pattern, businessId, r.categoryName, businessId, r.name]);
     }
 
-    // In SaaS mode, provision a 14-day trial subscription for new users.
-    // Idempotent: ON CONFLICT DO NOTHING means repeat logins are no-ops.
+    // ── 6. Provision trial subscription for SaaS mode ───────────────────────
+    let trialEndsAt: string | null = null;
     if (process.env.APP_MODE === 'saas') {
-      const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-      const subRepo = new SubscriptionRepoImpl(this.db, userId);
+      const fourteenDays = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      const promoEnd = new Date('2026-06-30T23:59:59Z');
+      trialEndsAt = (fourteenDays > promoEnd ? fourteenDays : promoEnd).toISOString();
+      const subRepo = new SubscriptionRepoImpl(this.db, orgId);
       await subRepo.create({ status: 'trialing', plan: 'beta', trialEndsAt });
     }
+    return { trialEndsAt, orgId, businessId };
   }
 
+
+  /**
+   * Promotes/demotes admin status for a user based on the ADMIN_EMAILS env var.
+   * Idempotent; safe to call on every login.
+   */
+  async syncAdminStatus(userId: string, email: string | null): Promise<void> {
+    const shouldBeAdmin = email !== null && adminEmailSet().has(email.toLowerCase());
+    await this.db.run(
+      'UPDATE users SET is_admin = ? WHERE id = ?',
+      [shouldBeAdmin ? 1 : 0, userId],
+    );
+  }
 
   async getOwner(): Promise<User> {
     const existing = await this.findById(OWNER_USER_ID);
     if (existing) return existing;
     // Should already exist from migration 007, but be defensive.
     await this.db.run(
-      'INSERT INTO users(id, email, name) VALUES (?, NULL, ?) ON CONFLICT (id) DO NOTHING',
-      [OWNER_USER_ID, 'Owner'],
+      'INSERT INTO users(id, name_enc) VALUES (?, ?) ON CONFLICT (id) DO NOTHING',
+      [OWNER_USER_ID, encrypt('Owner')],
     );
     return (await this.findById(OWNER_USER_ID))!;
   }
@@ -141,34 +207,55 @@ export class UserRepoImpl implements UserRepo {
     return { userId: row.id as string, passwordHash: row.password_hash as string };
   }
 
-  async createLocal(username: string, passwordHash: string): Promise<User> {
+  async createLocal(username: string, passwordHash: string, email: string, tosAcceptedAt: string): Promise<User> {
     const id = crypto.randomUUID();
+    const emailHash = hashEmail(email.toLowerCase());
+    const emailEnc  = encrypt(email);
+    const nameEnc   = encrypt(username);
     await this.db.run(
-      'INSERT INTO users(id, email, name, username, password_hash) VALUES (?, ?, ?, ?, ?)',
-      [id, null, username, username, passwordHash],
+      'INSERT INTO users(id, email_hash, email_enc, name_enc, username, password_hash, tos_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, emailHash, emailEnc, nameEnc, username, passwordHash, tosAcceptedAt],
     );
     // Register a 'local' identity so findByIdentity('local', username) works.
     await this.upsertIdentity({ userId: id, provider: 'local', providerUserId: username });
     return (await this.findById(id))!;
   }
 
+  async updateEmail(userId: string, email: string): Promise<void> {
+    const emailHash = hashEmail(email.toLowerCase());
+    const emailEnc  = encrypt(email);
+    await this.db.run(
+      'UPDATE users SET email_hash = ?, email_enc = ? WHERE id = ?',
+      [emailHash, emailEnc, userId],
+    );
+  }
+
+  async setReceiptStoragePreference(userId: string, pref: ReceiptStoragePreference | null): Promise<void> {
+    await this.db.run(
+      'UPDATE users SET receipt_storage_preference = ? WHERE id = ?',
+      [pref, userId],
+    );
+  }
+
   // ── TOTP ───────────────────────────────────────────────────────────────────
 
   async getTotpRecord(userId: string): Promise<TotpRecord | null> {
     const row = await this.db.get(
-      'SELECT secret, enabled FROM user_totp WHERE user_id = ?',
+      'SELECT secret_enc, enabled FROM user_totp WHERE user_id = ?',
       [userId],
     );
     if (!row) return null;
-    return { secret: row.secret as string, enabled: !!(row.enabled) };
+    return { secret: decrypt(row.secret_enc as string), enabled: !!(row.enabled) };
   }
 
   async setTotpSecret(userId: string, secret: string): Promise<void> {
+    const secretEnc = encrypt(secret);
     await this.db.run(`
-      INSERT INTO user_totp(user_id, secret, enabled)
+      INSERT INTO user_totp(user_id, secret_enc, enabled)
       VALUES (?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, enabled = excluded.enabled
-    `, [userId, secret, false]);
+      ON CONFLICT(user_id) DO UPDATE
+        SET secret_enc = excluded.secret_enc, enabled = excluded.enabled
+    `, [userId, secretEnc, false]);
   }
 
   async enableTotp(userId: string): Promise<void> {
@@ -177,5 +264,23 @@ export class UserRepoImpl implements UserRepo {
 
   async disableTotp(userId: string): Promise<void> {
     await this.db.run('DELETE FROM user_totp WHERE user_id = ?', [userId]);
+  }
+
+  async delete(userId: string): Promise<void> {
+    await this.db.run('DELETE FROM users WHERE id = ?', [userId]);
+  }
+
+  async markEmailBounced(emailHash: string, at: string): Promise<void> {
+    await this.db.run(
+      'UPDATE users SET email_bounced_at = ? WHERE email_hash = ? AND email_bounced_at IS NULL',
+      [at, emailHash],
+    );
+  }
+
+  async markEmailComplained(emailHash: string, at: string): Promise<void> {
+    await this.db.run(
+      'UPDATE users SET email_complained_at = ? WHERE email_hash = ? AND email_complained_at IS NULL',
+      [at, emailHash],
+    );
   }
 }

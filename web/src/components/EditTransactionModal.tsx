@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { Transaction } from '@keepmyledger/shared';
 import { api } from '../api/client';
 import { colors, radii, shadows } from '../styles/tokens';
@@ -46,6 +46,13 @@ export function EditTransactionModal({ tx, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   const submit = async () => {
     setError(null);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -83,17 +90,24 @@ export function EditTransactionModal({ tx, onClose, onSaved }: Props) {
   };
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
+    <div
+      style={overlayStyle}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-tx-modal-title"
+      onClick={onClose}
+    >
       <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ margin: '0 0 16px', fontSize: 18 }}>Edit transaction</h2>
+        <h2 id="edit-tx-modal-title" style={{ margin: '0 0 16px', fontSize: 18 }}>Edit transaction</h2>
         <p style={{ margin: '0 0 16px', fontSize: 12, color: '#666' }}>
           Fix a row that was parsed incorrectly. Updating these fields recomputes the
           dedup hash, so re-importing the same statement won't create a duplicate.
         </p>
 
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>Date</label>
+          <label htmlFor="edit-tx-date" style={labelStyle}>Date</label>
           <input
+            id="edit-tx-date"
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
@@ -102,8 +116,9 @@ export function EditTransactionModal({ tx, onClose, onSaved }: Props) {
         </div>
 
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>Description</label>
+          <label htmlFor="edit-tx-description" style={labelStyle}>Description</label>
           <input
+            id="edit-tx-description"
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -112,8 +127,9 @@ export function EditTransactionModal({ tx, onClose, onSaved }: Props) {
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <label style={labelStyle}>Amount (negative = expense)</label>
+          <label htmlFor="edit-tx-amount" style={labelStyle}>Amount (negative = expense)</label>
           <input
+            id="edit-tx-amount"
             type="text"
             inputMode="decimal"
             value={amountStr}

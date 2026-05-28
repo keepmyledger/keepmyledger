@@ -80,7 +80,7 @@ export interface PositionedLine {
  * Extract every text fragment from the PDF along with its position.
  * Fragments are returned in page order; within a page they reflect pdfjs's
  * native ordering (which is roughly top-to-bottom, left-to-right but not
- * guaranteed — use `groupByLine` to organize).
+ * guaranteed; use `groupByLine` to organize).
  */
 export async function extractPositionedText(buffer: Buffer): Promise<PositionedText[]> {
   const pdfjs = await loadPdfjs();

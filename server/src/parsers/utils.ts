@@ -53,7 +53,7 @@ export function hashTransaction(
 ): string {
   const normalizedDesc = description.toLowerCase().replace(/\s+/g, ' ').trim();
   const raw = `${accountId}|${date}|${normalizedDesc}|${amount.toFixed(2)}`;
-  // Simple djb2 hash — good enough for local deduplication (not cryptographic)
+  // Simple djb2 hash; good enough for local deduplication (not cryptographic)
   let h = 5381;
   for (let i = 0; i < raw.length; i++) {
     h = ((h << 5) + h) ^ raw.charCodeAt(i);

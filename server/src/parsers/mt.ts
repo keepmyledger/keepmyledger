@@ -63,13 +63,13 @@ export const mtParser: BankParser = {
         if (AMOUNT_RE.test(item.text)) {
           const value = parseAmount(item.text);
           if (item.x >= cols.balance - 5) {
-            // balance column — ignore
+            // balance column; ignore
           } else if (item.x >= cols.withdrawals - 5) {
             withdrawal = value;
           } else if (item.x >= cols.deposits - 5) {
             deposit = value;
           } else {
-            // amount fragment inside description (e.g. account #) — keep as text
+            // amount fragment inside description (e.g. account #); keep as text
             descParts.push(item.text);
           }
         } else {

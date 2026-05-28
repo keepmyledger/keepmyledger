@@ -61,9 +61,14 @@ code, kbd, pre, samp {
 }
 
 input, select, textarea { font-family: inherit; }
-input:focus, select:focus, textarea:focus, button:focus-visible {
-  outline: 2px solid rgba(46, 125, 97, 0.45); /* forest green @ 45% */
-  outline-offset: 1px;
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+  outline: 2px solid #2E7D61; /* forest green – meets 3:1 non-text contrast */
+  outline-offset: 2px;
+}
+/* Fallback for browsers that don't support :focus-visible */
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid #2E7D61;
+  outline-offset: 2px;
 }
 
 ::selection {

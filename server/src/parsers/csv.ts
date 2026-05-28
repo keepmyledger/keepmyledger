@@ -59,7 +59,7 @@ export function parseCsv(rawText: string, options: ParseCsvOptions = {}): Parsed
   let dataRows: string[][];
 
   if (options.mapping) {
-    // Caller supplied an explicit mapping — assume first row is data unless
+    // Caller supplied an explicit mapping; assume first row is data unless
     // it doesn't parse, in which case it's probably a header to skip.
     mapping = options.mapping;
     dataRows = rowLooksLikeData(rows[0], mapping) ? rows : rows.slice(1);
@@ -72,13 +72,16 @@ export function parseCsv(rawText: string, options: ParseCsvOptions = {}): Parsed
   }
 
   const transactions: ParsedTransaction[] = [];
+  let skippedMissingFields = 0;
+  let skippedBadDate = 0;
+  let skippedBadAmount = 0;
 
   for (const row of dataRows) {
     const dateRaw = row[mapping.date]?.trim();
     const descRaw = row[mapping.description]?.trim();
-    if (!dateRaw || !descRaw) continue;
+    if (!dateRaw || !descRaw) { skippedMissingFields++; continue; }
     const date = parseDate(dateRaw);
-    if (!date) continue;
+    if (!date) { skippedBadDate++; continue; }
 
     let amount: number | null = null;
     if (typeof mapping.amount === 'number' && mapping.amount >= 0) {
@@ -89,7 +92,7 @@ export function parseCsv(rawText: string, options: ParseCsvOptions = {}): Parsed
       const value = credit - debit;
       amount = value === 0 && debit === 0 && credit === 0 ? null : value;
     }
-    if (amount === null || Number.isNaN(amount)) continue;
+    if (amount === null || Number.isNaN(amount)) { skippedBadAmount++; continue; }
 
     transactions.push({
       date,
@@ -102,6 +105,16 @@ export function parseCsv(rawText: string, options: ParseCsvOptions = {}): Parsed
     throw new Error('CSV parsed but no transactions were extracted (check column mapping)');
   }
 
+  const warnings: string[] = [];
+  const totalSkipped = skippedMissingFields + skippedBadDate + skippedBadAmount;
+  if (totalSkipped > 0 && totalSkipped / dataRows.length > 0.1) {
+    const parts: string[] = [];
+    if (skippedBadDate > 0) parts.push(`${skippedBadDate} with unparseable dates`);
+    if (skippedBadAmount > 0) parts.push(`${skippedBadAmount} with unparseable amounts`);
+    if (skippedMissingFields > 0) parts.push(`${skippedMissingFields} missing required fields`);
+    warnings.push(`Skipped ${totalSkipped} of ${dataRows.length} rows (${parts.join(', ')}). Check the column mapping.`);
+  }
+
   return {
     period: inferPeriodFromTransactions(transactions),
     bankType: 'unknown' as never, // CSV is bank-agnostic
@@ -109,6 +122,7 @@ export function parseCsv(rawText: string, options: ParseCsvOptions = {}): Parsed
     transactions,
     detectedMapping: mapping,
     delimiter,
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
 
@@ -322,7 +336,7 @@ function inferMappingFromContent(rows: string[][]): ColumnMapping {
   } else if (amountCols.length >= 2 && amountCols[0].s.allPositive && amountCols[1].s.allPositive) {
     // Heuristic: the column with the larger average value tends to be
     // credit/deposit (income); the smaller, debit/expense. Without
-    // headers we can't be sure — but the math (credit - debit) still
+    // headers we can't be sure, but the math (credit - debit) still
     // works as long as we're consistent. Default: first = debit, second = credit
     // matching common bank CSV column order.
     debit = amountCols[0].i;

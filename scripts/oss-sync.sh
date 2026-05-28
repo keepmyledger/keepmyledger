@@ -16,7 +16,14 @@ PRIMARY_BRANCH="${PRIMARY_BRANCH:-main}"
 BASE_TAG="${BASE_TAG:-oss-sync-base}"
 WORK_BRANCH="${WORK_BRANCH:-oss-sync-work}"
 
-BLOCKED_REGEX='^(fly.toml|TODO.md|STYLING.md|web/src/pages/Privacy.tsx|web/src/pages/Terms.tsx|web/public/klm-hero.png|server/src/db/migrations/|server/src/db/migrations-pg/)'
+# Paths that must never reach the OSS mirror:
+#   fly.toml, TODO.md, STYLING.md     — private deployment / ops / brand-style files
+#   scripts/private/                  — private deployment scripts
+#   web/index.html                    — contains KML-specific meta/JSON-LD; OSS ships its own
+#   web/tsconfig.json                 — content paths differ: private → .local.*, OSS → .template.*
+#   web/public/klm-hero*              — brand hero images
+#   web/src/content/**/*.local.*      — brand/legal override files (template files ARE public)
+BLOCKED_REGEX='^(fly\.toml|TODO\.md|STYLING\.md|scripts/private/|web/index\.html|web/tsconfig\.json|web/public/klm-hero|web/src/content/.*\.local\.)'
 
 require_clean_tree() {
   if [[ -n "$(git status --porcelain)" ]]; then

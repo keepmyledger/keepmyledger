@@ -43,5 +43,33 @@ export function authRouter(db: DbAdapter, providers: AvailableProvider[]): Route
     );
   }
 
+  // Microsoft (Identity Platform v2.0). Scopes are configured on the strategy,
+  // so the initiator doesn't need to repeat them. Callback is a GET — Microsoft
+  // uses query-string response mode by default, so the session cookie rides
+  // along normally (unlike Apple's cross-site POST).
+  if (enabledIds.has('microsoft')) {
+    router.get('/microsoft', passport.authenticate('microsoft'));
+
+    router.get(
+      '/microsoft/callback',
+      passport.authenticate('microsoft', { failureRedirect: '/login?error=oauth' }),
+      (_req, res) => res.redirect('/'),
+    );
+  }
+
+  // Apple
+  // The callback is POST because Apple uses response_mode=form_post.
+  // Apple sends a JSON `user` field in the body only on first authorization;
+  // the strategy in auth/apple.ts reads it off req.body.
+  if (enabledIds.has('apple')) {
+    router.get('/apple', passport.authenticate('apple', { scope: ['name', 'email'] }));
+
+    router.post(
+      '/apple/callback',
+      passport.authenticate('apple', { failureRedirect: '/login?error=oauth' }),
+      (_req, res) => res.redirect('/'),
+    );
+  }
+
   return router;
 }

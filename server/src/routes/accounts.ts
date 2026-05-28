@@ -23,7 +23,8 @@ export function accountsRouter(): Router {
   });
 
   router.patch('/:id', async (req: Request, res: Response) => {
-    const account = await req.ctx!.repos.accounts.update(Number(req.params.id), req.body);
+    const { name, bankType, accountKind, csvMapping } = req.body as Record<string, unknown>;
+    const account = await req.ctx!.repos.accounts.update(Number(req.params.id), { name, bankType, accountKind, csvMapping } as never);
     if (!account) return res.status(404).json({ error: 'Account not found' });
     res.json(account);
   });

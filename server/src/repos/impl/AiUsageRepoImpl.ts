@@ -12,6 +12,14 @@ export class AiUsageRepoImpl implements AiUsageRepo {
     return row ? Number(row.count) : 0;
   }
 
+  async getLifetimeCount(): Promise<number> {
+    const row = await this.db.get<{ total: number }>(
+      'SELECT COALESCE(SUM(count), 0) AS total FROM ai_usage WHERE user_id = ?',
+      [this.userId],
+    );
+    return row ? Number(row.total) : 0;
+  }
+
   async incrementToday(): Promise<number> {
     // Atomic upsert + RETURNING works identically on sqlite and postgres.
     const row = await this.db.get<{ count: number }>(
