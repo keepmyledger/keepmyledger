@@ -160,15 +160,17 @@ export function importsRouter(db: DbAdapter): Router {
   router.post('/preview', uploadLimiter, upload.single('file'), async (req: Request, res: Response) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const token = path.basename(req.file.path);
-    const ext = path.extname(req.file.path);
+    // Derive a safe path from the basename so static analysis sees the traversal guard.
+    const safeFilePath = path.join(UPLOAD_DIR, token);
+    const ext = path.extname(token);
     try {
-      validateUpload(req.file.path, ext);
+      validateUpload(safeFilePath, ext);
       const kind = fileKindFromToken(token);
       const accountId = req.body?.accountId ? Number(req.body.accountId) : null;
       const services = req.ctx!.services.imports;
 
       if (kind === 'pdf') {
-        const parsed = await services.previewPdf(req.file.path);
+        const parsed = await services.previewPdf(safeFilePath);
         return res.json({ token, kind, parsed, llmAvailable: isLlmConfigured() });
       }
 
@@ -176,7 +178,7 @@ export function importsRouter(db: DbAdapter): Router {
         let parsed = null;
         let parseError: string | null = null;
         try {
-          parsed = await services.previewQif(req.file.path);
+          parsed = await services.previewQif(safeFilePath);
         } catch (err) {
           parseError = err instanceof Error ? err.message : String(err);
         }
@@ -187,7 +189,7 @@ export function importsRouter(db: DbAdapter): Router {
         let parsed = null;
         let parseError: string | null = null;
         try {
-          parsed = await services.previewOfx(req.file.path);
+          parsed = await services.previewOfx(safeFilePath);
         } catch (err) {
           parseError = err instanceof Error ? err.message : String(err);
         }
@@ -196,7 +198,7 @@ export function importsRouter(db: DbAdapter): Router {
 
       // CSV: inspect first so we can return raw rows + auto-detected mapping
       // for the column-mapping UI even when transactions fail to parse.
-      const text = fs.readFileSync(req.file.path, 'utf8');
+      const text = fs.readFileSync(safeFilePath, 'utf8');
       const inspect = inspectCsv(text);
       let mapping: CsvColumnMapping | null = inspect.detectedMapping;
 
@@ -209,7 +211,7 @@ export function importsRouter(db: DbAdapter): Router {
       let parsed = null;
       let parseError: string | null = null;
       try {
-        parsed = await services.previewCsv(req.file.path, mapping ?? undefined);
+        parsed = await services.previewCsv(safeFilePath, mapping ?? undefined);
       } catch (err) {
         parseError = err instanceof Error ? err.message : String(err);
       }
@@ -230,7 +232,7 @@ export function importsRouter(db: DbAdapter): Router {
         },
       });
     } catch (err) {
-      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+      try { fs.unlinkSync(safeFilePath); } catch { /* ignore */ }
       const msg = err instanceof Error ? err.message : String(err);
       res.status(422).json({ error: msg });
     }
@@ -521,30 +523,32 @@ export function importsRouter(db: DbAdapter): Router {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const accountId = Number(req.body?.accountId);
+    const safeFilePath = path.join(UPLOAD_DIR, path.basename(req.file.path));
+
     if (!accountId) {
-      fs.unlinkSync(req.file.path);
+      try { fs.unlinkSync(safeFilePath); } catch { /* ignore */ }
       return res.status(400).json({ error: 'accountId is required' });
     }
 
     try {
-      validateUpload(req.file.path, path.extname(req.file.path));
-      const kind = fileKindFromToken(path.basename(req.file.path));
+      validateUpload(safeFilePath, path.extname(safeFilePath));
+      const kind = fileKindFromToken(path.basename(safeFilePath));
       let result;
       if (kind === 'csv') {
-        result = await req.ctx!.services.imports.importCsv(accountId, req.file.path);
+        result = await req.ctx!.services.imports.importCsv(accountId, safeFilePath);
       } else if (kind === 'qif') {
-        result = await req.ctx!.services.imports.importQif(accountId, req.file.path);
+        result = await req.ctx!.services.imports.importQif(accountId, safeFilePath);
       } else if (kind === 'ofx') {
-        result = await req.ctx!.services.imports.importOfx(accountId, req.file.path);
+        result = await req.ctx!.services.imports.importOfx(accountId, safeFilePath);
       } else {
-        result = await req.ctx!.services.imports.importPdf(accountId, req.file.path);
+        result = await req.ctx!.services.imports.importPdf(accountId, safeFilePath);
       }
       res.status(201).json(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(422).json({ error: msg });
     } finally {
-      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+      try { fs.unlinkSync(safeFilePath); } catch { /* ignore */ }
     }
   });
 

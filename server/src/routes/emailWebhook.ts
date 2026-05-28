@@ -22,19 +22,32 @@ import type { DbAdapter } from '../db/adapter';
 import { getUserRepo } from '../auth/context';
 import { hashEmail } from '../auth/emailHash';
 
-// SNS signs messages with SHA1withRSA; the cert URL must be from amazonaws.com.
-const SNS_CERT_DOMAIN_RE = /^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//;
+// SNS signs messages with SHA1withRSA; cert/subscribe URLs must be from sns.*.amazonaws.com.
+const SNS_CERT_HOST_RE = /^sns\.[a-z0-9-]+\.amazonaws\.com$/;
+
+function parseSnsUrl(raw: string): URL | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:' || !SNS_CERT_HOST_RE.test(u.hostname)) return null;
+    return u;
+  } catch {
+    return null;
+  }
+}
 
 /** Cached certs by URL to avoid repeated downloads. */
 const certCache = new Map<string, string>();
 
 function fetchCert(url: string): Promise<string> {
-  if (certCache.has(url)) return Promise.resolve(certCache.get(url)!);
+  const parsed = parseSnsUrl(url);
+  if (!parsed) return Promise.reject(new Error('Cert URL must be from sns.*.amazonaws.com over HTTPS'));
+  const safeUrl = parsed.href;
+  if (certCache.has(safeUrl)) return Promise.resolve(certCache.get(safeUrl)!);
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    https.get(safeUrl, (res) => {
       let data = '';
       res.on('data', (chunk: string) => { data += chunk; });
-      res.on('end', () => { certCache.set(url, data); resolve(data); });
+      res.on('end', () => { certCache.set(safeUrl, data); resolve(data); });
     }).on('error', reject);
   });
 }
@@ -53,9 +66,7 @@ function buildSigningString(msg: Record<string, string>): string {
 async function verifySnsSignature(msg: Record<string, string>): Promise<boolean> {
   try {
     const certUrl = msg.SigningCertURL ?? '';
-    if (!SNS_CERT_DOMAIN_RE.test(certUrl)) return false;
-
-    const cert = await fetchCert(certUrl);
+    const cert = await fetchCert(certUrl); // fetchCert validates the URL internally
     const signingString = buildSigningString(msg);
     const signature = Buffer.from(msg.Signature ?? '', 'base64');
 
@@ -69,8 +80,9 @@ async function verifySnsSignature(msg: Record<string, string>): Promise<boolean>
 
 /** Confirm an SNS subscription by fetching the SubscribeURL. */
 function confirmSubscription(subscribeUrl: string): void {
-  if (!SNS_CERT_DOMAIN_RE.test(subscribeUrl)) return;
-  https.get(subscribeUrl, (res) => {
+  const parsed = parseSnsUrl(subscribeUrl);
+  if (!parsed) return;
+  https.get(parsed.href, (res) => {
     res.resume(); // drain
     console.log('[emailWebhook] SNS subscription confirmed, status', res.statusCode);
   }).on('error', (err) => {
