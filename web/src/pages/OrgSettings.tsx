@@ -72,6 +72,8 @@ export function OrgSettingsPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'owner' | 'member'>('member');
   const [newBizName, setNewBizName] = useState('');
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -149,6 +151,31 @@ export function OrgSettingsPage() {
     await api.businesses.deleteLogo(orgId, businessId).catch(() => {/* silent */});
     void load();
     void refreshAuth();
+  };
+
+  const handleStartRename = (biz: Business) => {
+    setRenamingId(biz.id);
+    setRenameValue(biz.name);
+    setError(null);
+  };
+
+  const handleCancelRename = () => {
+    setRenamingId(null);
+    setRenameValue('');
+  };
+
+  const handleSaveRename = async (id: number) => {
+    if (!orgId) return;
+    setError(null);
+    try {
+      await api.businesses.rename(orgId, id, renameValue.trim());
+      setRenamingId(null);
+      setRenameValue('');
+      void load();
+      void refreshAuth();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename business');
+    }
   };
 
   const handleDeleteBusiness = async (id: number) => {
@@ -299,17 +326,61 @@ export function OrgSettingsPage() {
                     onClear={() => { void handleClearLogo(biz.id); }}
                   />
                 </td>
-                <td style={tdStyle}>{biz.name}</td>
                 <td style={tdStyle}>
-                  {bizList.length > 1 && (
-                    <button
-                      style={dangerButtonStyle}
-                      type="button"
-                      onClick={() => { void handleDeleteBusiness(biz.id); }}
-                    >
-                      Delete
-                    </button>
+                  {renamingId === biz.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); void handleSaveRename(biz.id); }
+                        if (e.key === 'Escape') { e.preventDefault(); handleCancelRename(); }
+                      }}
+                      maxLength={100}
+                      style={{ padding: '6px 8px', borderRadius: radii.sm, border: `1px solid ${colors.softLine}`, fontSize: 13, width: 220 }}
+                    />
+                  ) : (
+                    biz.name
                   )}
+                </td>
+                <td style={tdStyle}>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {renamingId === biz.id ? (
+                      <>
+                        <button
+                          style={primaryButtonStyle}
+                          type="button"
+                          onClick={() => { void handleSaveRename(biz.id); }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          style={{ ...primaryButtonStyle, background: 'transparent', color: colors.mutedGray, border: `1px solid ${colors.softLine}` }}
+                          type="button"
+                          onClick={handleCancelRename}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        style={{ ...primaryButtonStyle, background: 'transparent', color: colors.darkSlate, border: `1px solid ${colors.softLine}`, padding: '4px 10px', fontSize: 12 }}
+                        type="button"
+                        onClick={() => handleStartRename(biz)}
+                      >
+                        Rename
+                      </button>
+                    )}
+                    {bizList.length > 1 && renamingId !== biz.id && (
+                      <button
+                        style={dangerButtonStyle}
+                        type="button"
+                        onClick={() => { void handleDeleteBusiness(biz.id); }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

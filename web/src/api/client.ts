@@ -317,10 +317,10 @@ export const api = {
     loginUrl: (provider: string) => `${BASE}/auth/${provider}`,
 
     local: {
-      register: (username: string, password: string, email: string) =>
+      register: (username: string, password: string, email: string, businessName: string) =>
         request<{ user: User }>('/auth/local/register', {
           method: 'POST',
-          body: JSON.stringify({ username, password, email, acceptTos: true }),
+          body: JSON.stringify({ username, password, email, businessName, acceptTos: true }),
         }),
       login: (username: string, password: string) =>
         request<{ user?: User; mfaRequired?: boolean }>('/auth/local/login', {

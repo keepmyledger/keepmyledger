@@ -32,6 +32,25 @@ describe('SqliteUserRepo', () => {
     expect(rules2.length).toBe(rules1.length);
   });
 
+  it('provisionDefaults uses an explicit businessName when supplied', async () => {
+    const u = await h.userRepo.create({ email: 'biz@e.f', name: 'B' });
+    const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id, 'Acme LLC');
+    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id, orgId, businessId);
+    const biz = await repos.businesses.findById(businessId);
+    expect(biz?.name).toBe('Acme LLC');
+    // Org name is auto-derived from business name so the UI doesn't show "Personal".
+    const orgRow = await h.db.get<{ name: string }>('SELECT name FROM organizations WHERE id = ?', [orgId]);
+    expect(orgRow?.name).toBe('Acme LLC');
+  });
+
+  it('provisionDefaults falls back to "Personal" when no businessName is supplied', async () => {
+    const u = await h.userRepo.create({ email: 'oauth@e.f', name: 'O' });
+    const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id);
+    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id, orgId, businessId);
+    const biz = await repos.businesses.findById(businessId);
+    expect(biz?.name).toBe('Personal');
+  });
+
   it('provisionDefaults seeds auto-rules pointing at the user\'s own categories', async () => {
     const u = await h.userRepo.create({ email: 'r@e.f', name: 'R' });
     const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id);

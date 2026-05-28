@@ -20,6 +20,7 @@ const AdminPage         = React.lazy(() => import('./pages/Admin').then(m => ({ 
 const OrgSettingsPage   = React.lazy(() => import('./pages/OrgSettings').then(m => ({ default: m.OrgSettingsPage })));
 const AcceptInvitePage  = React.lazy(() => import('./pages/AcceptInvite').then(m => ({ default: m.AcceptInvitePage })));
 import { StartupPromptModal } from './components/StartupPromptModal';
+import { BusinessSetupModal } from './components/BusinessSetupModal';
 import { BusinessSwitcher } from './components/BusinessSwitcher';
 import { ConsentBanner } from './components/ConsentBanner';
 import { useIsMobile } from './hooks/useMediaQuery';
@@ -166,6 +167,7 @@ function AppShell() {
   return (
     <>
       <RouteTitle />
+      <BusinessSetupModal />
       <StartupPromptModal />
       <TrialBanner />
       <EmailPromptBanner />

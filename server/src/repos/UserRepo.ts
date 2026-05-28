@@ -29,8 +29,16 @@ export interface UserRepo {
   findByIdentity(provider: string, providerUserId: string): Promise<User | undefined>;
   create(payload: CreateUserPayload): Promise<User>;
   upsertIdentity(payload: UpsertIdentityPayload): Promise<void>;
-  /** Clone category templates + rules into the user's personal org/business (idempotent). */
-  provisionDefaults(userId: string): Promise<{ trialEndsAt: string | null; orgId: string; businessId: number }>;
+  /**
+   * Clone category templates + rules into the user's personal org/business (idempotent).
+   * `businessName` is required for new local registrations; OAuth + scripts/tests
+   * may omit it and accept the historical placeholder name ('Personal'), which the
+   * web app then forces the user to rename via BusinessSetupModal.
+   */
+  provisionDefaults(
+    userId: string,
+    businessName?: string,
+  ): Promise<{ trialEndsAt: string | null; orgId: string; businessId: number }>;
   /** Get (or create) the implicit owner user used in self-host mode. */
   getOwner(): Promise<User>;
   /** Promote/demote admin based on ADMIN_EMAILS env; idempotent, safe to call on login. */

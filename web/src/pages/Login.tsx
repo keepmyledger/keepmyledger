@@ -66,6 +66,7 @@ export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [tosAccepted, setTosAccepted] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -80,7 +81,14 @@ export function LoginPage() {
     setLoading(true);
     try {
       if (mode === 'register') {
-        await api.auth.local.register(username.trim(), password, email.trim());
+        const trimmedBusiness = businessName.trim();
+        if (!trimmedBusiness) {
+          throw new Error('Business name is required');
+        }
+        if (trimmedBusiness.toLowerCase() === 'personal') {
+          throw new Error("'Personal' isn't a business name. Try something like 'Acme LLC' or 'Jane Smith Consulting'.");
+        }
+        await api.auth.local.register(username.trim(), password, email.trim(), trimmedBusiness);
       } else {
         const res = await api.auth.local.login(username.trim(), password);
         if (res.mfaRequired) { setMode('mfa'); return; }
@@ -253,6 +261,20 @@ export function LoginPage() {
                     </label>
                   )}
                   {mode === 'register' && (
+                    <label style={labelStyle}>
+                      Business name
+                      <input
+                        type="text"
+                        autoComplete="organization"
+                        placeholder="e.g. Acme LLC, Jane Smith Consulting"
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        maxLength={100}
+                        style={inputStyle}
+                      />
+                    </label>
+                  )}
+                  {mode === 'register' && (
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: colors.darkSlate, cursor: 'pointer' }}>
                       <input
                         type="checkbox"
@@ -269,7 +291,7 @@ export function LoginPage() {
                     </label>
                   )}
                   {error && <ErrorBanner msg={error} />}
-                  <PrimaryBtn disabled={loading || !username.trim() || !password || (mode === 'register' && (!email.trim() || !tosAccepted))}>
+                  <PrimaryBtn disabled={loading || !username.trim() || !password || (mode === 'register' && (!email.trim() || !businessName.trim() || !tosAccepted))}>
                     {loading
                       ? (mode === 'register' ? 'Creating account…' : 'Signing in…')
                       : (mode === 'register' ? 'Create account' : 'Sign in')}
@@ -281,7 +303,7 @@ export function LoginPage() {
                       </Link>
                     </p>
                   )}
-                  <GhostBtn onClick={() => { setMode(mode === 'signin' ? 'register' : 'signin'); setEmail(''); setTosAccepted(false); setError(null); }}>
+                  <GhostBtn onClick={() => { setMode(mode === 'signin' ? 'register' : 'signin'); setEmail(''); setBusinessName(''); setTosAccepted(false); setError(null); }}>
                     {mode === 'signin' ? 'Create a new account' : 'Already have an account? Sign in'}
                   </GhostBtn>
                 </form>

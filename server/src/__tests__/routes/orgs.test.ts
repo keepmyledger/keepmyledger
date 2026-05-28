@@ -159,6 +159,15 @@ describe('POST /orgs/:orgId/businesses', () => {
     const res = await request(app).post(`/orgs/${h.ownerOrgId}/businesses`).send({});
     expect(res.status).toBe(400);
   });
+
+  it("rejects 'Personal' as a business name (case-insensitive)", async () => {
+    const app = makeOwnerApp(h);
+    for (const name of ['Personal', 'personal', '  PERSONAL  ']) {
+      const res = await request(app).post(`/orgs/${h.ownerOrgId}/businesses`).send({ name });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Personal/);
+    }
+  });
 });
 
 describe('PATCH /orgs/:orgId/businesses/:businessId', () => {
@@ -191,6 +200,18 @@ describe('PATCH /orgs/:orgId/businesses/:businessId', () => {
       .patch(`/orgs/${h.altOrgId}/businesses/${h.altBusinessId}`)
       .send({ name: 'Sneaky' });
     expect(res.status).toBe(403);
+  });
+
+  it("rejects rename to 'Personal' (case-insensitive)", async () => {
+    const app = makeOwnerApp(h);
+    const biz = await h.owner.businesses.create('Real Name');
+    for (const name of ['Personal', 'personal', '  PERSONAL  ']) {
+      const res = await request(app)
+        .patch(`/orgs/${h.ownerOrgId}/businesses/${biz.id}`)
+        .send({ name });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Personal/);
+    }
   });
 });
 

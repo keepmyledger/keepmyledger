@@ -100,16 +100,24 @@ export class UserRepoImpl implements UserRepo {
     `, [payload.userId, payload.provider, payload.providerUserId, payload.email ?? null]);
   }
 
-  async provisionDefaults(userId: string): Promise<{ trialEndsAt: string | null; orgId: string; businessId: number }> {
+  async provisionDefaults(
+    userId: string,
+    businessName?: string,
+  ): Promise<{ trialEndsAt: string | null; orgId: string; businessId: number }> {
+    // Local registration supplies a real business name; OAuth + scripts/tests
+    // omit it and accept the historical placeholder. The web app forces a
+    // rename via BusinessSetupModal whenever a business is named 'Personal'.
+    const resolvedName = (businessName?.trim() || 'Personal');
+
     // ── 1. Ensure personal org exists (id = userId by convention) ────────────
     // `created_at` is omitted so each backend uses its own DEFAULT
     // (SQLite: datetime('now'); PG: to_char(now() AT TIME ZONE 'UTC', …)).
     const orgId = userId;
     await this.db.run(`
       INSERT INTO organizations(id, name)
-      VALUES (?, 'Personal')
+      VALUES (?, ?)
       ON CONFLICT (id) DO NOTHING
-    `, [orgId]);
+    `, [orgId, resolvedName]);
 
     // ── 2. Ensure owner membership exists ───────────────────────────────────
     await this.db.run(`
@@ -118,21 +126,25 @@ export class UserRepoImpl implements UserRepo {
       ON CONFLICT (org_id, user_id) DO NOTHING
     `, [orgId, userId]);
 
-    // ── 3. Ensure personal business exists and get its id ───────────────────
-    // `created_at` omitted; backend DEFAULTs supply it (see step 1).
-    await this.db.run(`
-      INSERT INTO businesses(org_id, name)
-      SELECT ?, 'Personal'
-      WHERE NOT EXISTS (
-        SELECT 1 FROM businesses WHERE org_id = ? AND name = 'Personal'
-      )
-    `, [orgId, orgId]);
-
-    const bizRow = await this.db.get<{ id: number }>(
-      `SELECT id FROM businesses WHERE org_id = ? AND name = 'Personal' LIMIT 1`,
+    // ── 3. Ensure a business exists for this org and capture its id ─────────
+    // Idempotent: if any business already exists for the org (e.g. provisionDefaults
+    // is re-run on a returning user, or the org-seed migration already created one),
+    // reuse it rather than inserting a duplicate. The picked row is deterministic
+    // (lowest id) so repeated calls land on the same business.
+    const existingBiz = await this.db.get<{ id: number }>(
+      'SELECT id FROM businesses WHERE org_id = ? ORDER BY id ASC LIMIT 1',
       [orgId],
     );
-    const businessId = Number(bizRow!.id);
+    let businessId: number;
+    if (existingBiz) {
+      businessId = Number(existingBiz.id);
+    } else {
+      const inserted = await this.db.get<{ id: number }>(
+        'INSERT INTO businesses(org_id, name) VALUES (?, ?) RETURNING id',
+        [orgId, resolvedName],
+      );
+      businessId = Number(inserted!.id);
+    }
 
     // ── 4. Seed categories into the business (idempotent via UNIQUE constraint) ─
     await this.db.run(`

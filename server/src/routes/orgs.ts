@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { requireOrgOwner } from '../middleware/requireOrgOwner';
 import type { Storage } from '../services/storage/Storage';
 import { validateLogoUpload } from '../services/storage/uploadValidation';
+import { validateBusinessName } from '../repos/businessName';
 
 const LOGO_SIGNED_URL_TTL_SEC = 10 * 60;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
@@ -70,12 +71,13 @@ export function orgsRouter({ storage = null }: OrgsRouterDeps = {}): Router {
   /** Create a business in the active org (owner only). */
   router.post('/:orgId/businesses', requireOrgOwner(), async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { name } = req.body as { name: string };
-      if (!name?.trim()) {
-        res.status(400).json({ error: 'name is required' });
+      const { name } = req.body as { name?: string };
+      const check = validateBusinessName(name);
+      if (!check.ok) {
+        res.status(400).json({ error: check.error });
         return;
       }
-      const business = await req.ctx!.repos.businesses.create(name.trim());
+      const business = await req.ctx!.repos.businesses.create(check.name);
       res.status(201).json(business);
     } catch (err) { next(err); }
   });
@@ -84,11 +86,12 @@ export function orgsRouter({ storage = null }: OrgsRouterDeps = {}): Router {
   router.patch('/:orgId/businesses/:businessId', requireOrgOwner(), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { name } = req.body as { name?: string };
-      if (!name?.trim()) {
-        res.status(400).json({ error: 'name is required' });
+      const check = validateBusinessName(name);
+      if (!check.ok) {
+        res.status(400).json({ error: check.error });
         return;
       }
-      const business = await req.ctx!.repos.businesses.rename(Number(req.params.businessId), name.trim());
+      const business = await req.ctx!.repos.businesses.rename(Number(req.params.businessId), check.name);
       if (!business) {
         res.status(404).json({ error: 'Business not found' });
         return;

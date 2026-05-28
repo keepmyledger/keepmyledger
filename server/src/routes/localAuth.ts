@@ -7,6 +7,7 @@ import type { DbAdapter } from '../db/adapter';
 import { getUserRepo } from '../auth/context';
 import { welcomeEmail, passwordResetEmail, newUserSignupNotification } from '../services/emailService';
 import { logSecurityEvent } from '../auth/auditLog';
+import { validateBusinessName } from '../repos/businessName';
 
 // Augment express-session with our MFA pending state.
 declare module 'express-session' {
@@ -35,19 +36,23 @@ export function localAuthRouter(db: DbAdapter): Router {
 
   /**
    * POST /api/auth/local/register
-   * Body: { username, password, email, acceptTos }
+   * Body: { username, password, email, businessName, acceptTos }
    * Creates a new local-auth user, provisions defaults, and logs them in.
    */
   router.post('/register', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { username, password, email, acceptTos } = req.body as {
-        username?: string; password?: string; email?: string; acceptTos?: boolean;
+      const { username, password, email, businessName, acceptTos } = req.body as {
+        username?: string; password?: string; email?: string; businessName?: string; acceptTos?: boolean;
       };
       if (!username || !password) {
         return res.status(400).json({ error: 'username and password required' });
       }
       if (!email || !EMAIL_RE.test(email)) {
         return res.status(400).json({ error: 'A valid email address is required' });
+      }
+      const businessNameCheck = validateBusinessName(businessName);
+      if (!businessNameCheck.ok) {
+        return res.status(400).json({ error: businessNameCheck.error });
       }
       if (!acceptTos) {
         return res.status(400).json({ error: 'You must accept the Terms of Service' });
@@ -68,7 +73,7 @@ export function localAuthRouter(db: DbAdapter): Router {
       const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
       const tosAcceptedAt = new Date().toISOString();
       const user = await userRepo.createLocal(normalized, passwordHash, normalizedEmail, tosAcceptedAt);
-      const { trialEndsAt } = await userRepo.provisionDefaults(user.id);
+      const { trialEndsAt } = await userRepo.provisionDefaults(user.id, businessNameCheck.name);
 
       // Send welcome email and internal signup notification (non-blocking).
       welcomeEmail(user.username ?? user.name ?? 'there', user.email!, trialEndsAt);
