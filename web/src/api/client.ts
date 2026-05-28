@@ -23,9 +23,32 @@ export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
 let onSubscriptionRequired: (() => void) | undefined;
 export function setSubscriptionRequiredHandler(fn: () => void) { onSubscriptionRequired = fn; }
 
-/** The active business id injected as x-business-id on every request. */
-let activeBusinessId: number | null = null;
-export function setActiveBusinessId(id: number | null) { activeBusinessId = id; }
+/**
+ * The active business id injected as x-business-id on every request.
+ * Persisted to localStorage so the user's selection survives page reloads —
+ * BusinessSwitcher triggers a full reload after switching, which would
+ * otherwise wipe this module-level state and revert to the first business.
+ */
+const ACTIVE_BUSINESS_STORAGE_KEY = 'kml.activeBusinessId';
+
+function readStoredBusinessId(): number | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_BUSINESS_STORAGE_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+
+let activeBusinessId: number | null = readStoredBusinessId();
+export function getActiveBusinessId(): number | null { return activeBusinessId; }
+export function setActiveBusinessId(id: number | null) {
+  activeBusinessId = id;
+  try {
+    if (id === null) localStorage.removeItem(ACTIVE_BUSINESS_STORAGE_KEY);
+    else localStorage.setItem(ACTIVE_BUSINESS_STORAGE_KEY, String(id));
+  } catch { /* localStorage unavailable — header still works for this session */ }
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const extraHeaders: Record<string, string> = {};

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { api, setUnauthorizedHandler, setActiveBusinessId } from '../api/client';
+import { api, setUnauthorizedHandler, setActiveBusinessId, getActiveBusinessId } from '../api/client';
 import type { AppConfig, User, Business } from '@keepmyledger/shared';
 
 interface AuthState {
@@ -30,7 +30,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     config: null,
     user: null,
     orgId: null,
-    businessId: null,
+    // Seed from localStorage so refresh() preserves the user's selection across reloads.
+    businessId: getActiveBusinessId(),
     businesses: [],
   });
 

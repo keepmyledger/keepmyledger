@@ -103,10 +103,24 @@ async function bootstrap(): Promise<void> {
     contentSecurityPolicy: {
       directives: {
         defaultSrc:       ["'self'"],
-        scriptSrc:        ["'self'", 'https://js.stripe.com'],
-        styleSrc:         ["'self'", "'unsafe-inline'"],
+        scriptSrc:        [
+          "'self'",
+          'https://js.stripe.com',
+          'https://www.googletagmanager.com',
+          'https://static.cloudflareinsights.com',
+        ],
+        styleSrc:         ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc:          ["'self'", 'data:', 'https://fonts.gstatic.com'],
         imgSrc:           ["'self'", 'data:', 'blob:', 'https:'],
-        connectSrc:       ["'self'", 'https://api.stripe.com', ...sentryConnectSrc],
+        connectSrc:       [
+          "'self'",
+          'https://api.stripe.com',
+          'https://www.google-analytics.com',
+          'https://*.analytics.google.com',
+          'https://*.googletagmanager.com',
+          'https://cloudflareinsights.com',
+          ...sentryConnectSrc,
+        ],
         frameSrc:         ["'self'", 'https://js.stripe.com', 'https://hooks.stripe.com'],
         frameAncestors:   ["'none'"],
         objectSrc:        ["'none'"],
