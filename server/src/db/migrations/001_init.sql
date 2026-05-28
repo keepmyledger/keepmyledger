@@ -142,7 +142,7 @@ INSERT INTO businesses(org_id, name)
 -- ── accounts ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS accounts (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id               TEXT    NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
+  user_id               TEXT             REFERENCES users(id)      ON DELETE CASCADE,
   business_id           INTEGER          REFERENCES businesses(id),
   name                  TEXT    NOT NULL,
   bank_type             TEXT    NOT NULL,   -- mt | amex | chase | unknown | ofx
@@ -215,7 +215,7 @@ INSERT OR IGNORE INTO categories(user_id, business_id, name, kind, tax_export_co
 -- ── statements ───────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS statements (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id         TEXT    NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
+  user_id         TEXT             REFERENCES users(id)      ON DELETE CASCADE,
   business_id     INTEGER          REFERENCES businesses(id),
   account_id      INTEGER NOT NULL REFERENCES accounts(id)   ON DELETE CASCADE,
   period          TEXT    NOT NULL,   -- YYYY-MM
@@ -231,7 +231,7 @@ CREATE INDEX IF NOT EXISTS idx_statements_account_period ON statements(account_i
 -- ── rules ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rules (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id             TEXT    NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
+  user_id             TEXT             REFERENCES users(id)      ON DELETE CASCADE,
   business_id         INTEGER          REFERENCES businesses(id),
   name                TEXT    NOT NULL,
   description_pattern TEXT    NOT NULL,
