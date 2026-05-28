@@ -3,29 +3,11 @@ import { User, ReceiptStoragePreference } from '@keepmyledger/shared';
 import { UserRepo, TotpRecord, CreateUserPayload, UpsertIdentityPayload } from '../UserRepo';
 import { DbAdapter } from '../../db/adapter';
 import { SubscriptionRepoImpl } from './SubscriptionRepoImpl';
+import { seedBusinessDefaults } from './seedBusiness';
 import { hashEmail } from '../../auth/emailHash';
 import { encrypt, decrypt, encryptNullable, decryptNullable } from '../../auth/crypto';
 
 export const OWNER_USER_ID = '00000000-0000-0000-0000-000000000001';
-
-/**
- * Auto-categorization rules seeded into every new user's namespace by
- * `provisionDefaults`. Mirrors the owner-user seed in
- * `db/migrations-pg/001_init.sql` and `db/migrations/003_transfers.sql` +
- * `005_cashback_rebate.sql` so that SaaS users get the same out-of-the-box
- * behavior as self-host installs.
- */
-const AUTO_RULE_TEMPLATES: ReadonlyArray<{ name: string; pattern: string; categoryName: string }> = [
-  { name: 'Auto: Chase payment received',  pattern: 'Payment Thank You', categoryName: 'Credit Card Payment' },
-  { name: 'Auto: Amex autopay',            pattern: 'AUTOPAY PAYMENT',   categoryName: 'Credit Card Payment' },
-  { name: 'Auto: Amex online payment',     pattern: 'ONLINE PAYMENT',    categoryName: 'Credit Card Payment' },
-  { name: 'Auto: M&T credit card payment', pattern: 'AMERICAN EXPRESS',  categoryName: 'Credit Card Payment' },
-  { name: 'Auto: M&T Chase payment',       pattern: 'CHASE CREDIT CRD',  categoryName: 'Credit Card Payment' },
-  { name: 'Auto: Amex cash rebate',        pattern: 'CASH REBATE',       categoryName: 'Cash Back Rebate' },
-  { name: 'Auto: Amex cash reward',        pattern: 'CASH REWARD',       categoryName: 'Cash Back Rebate' },
-  { name: 'Auto: Chase cashback bonus',    pattern: 'CASHBACK BONUS',    categoryName: 'Cash Back Rebate' },
-  { name: 'Auto: Chase redemption credit', pattern: 'REDEMPTION CREDIT', categoryName: 'Cash Back Rebate' },
-];
 
 /** Emails (lowercased) granted admin access via ADMIN_EMAILS env var. */
 function adminEmailSet(): Set<string> {
@@ -146,28 +128,10 @@ export class UserRepoImpl implements UserRepo {
       businessId = Number(inserted!.id);
     }
 
-    // ── 4. Seed categories into the business (idempotent via UNIQUE constraint) ─
-    await this.db.run(`
-      INSERT INTO categories(business_id, user_id, name, kind, tax_export_code, is_business)
-      SELECT ?, ?, name, kind, tax_export_code, is_business FROM category_templates WHERE true
-      ON CONFLICT (business_id, name) DO NOTHING
-    `, [businessId, userId]);
+    // ── 4. Seed categories + auto-rules into the business ──────────────────
+    await seedBusinessDefaults(this.db, businessId, userId);
 
-    // ── 5. Seed auto-rules for transfer/cashback detection ──────────────────
-    for (const r of AUTO_RULE_TEMPLATES) {
-      await this.db.run(`
-        INSERT INTO rules(business_id, user_id, name, description_pattern, pattern_kind, category_id, priority)
-        SELECT ?, ?, ?, ?, 'substring', c.id, 100
-        FROM categories c
-        WHERE c.business_id = ? AND c.name = ?
-          AND NOT EXISTS (
-            SELECT 1 FROM rules existing
-            WHERE existing.business_id = ? AND existing.name = ?
-          )
-      `, [businessId, userId, r.name, r.pattern, businessId, r.categoryName, businessId, r.name]);
-    }
-
-    // ── 6. Provision trial subscription for SaaS mode ───────────────────────
+    // ── 5. Provision trial subscription for SaaS mode ───────────────────────
     let trialEndsAt: string | null = null;
     if (process.env.APP_MODE === 'saas') {
       const fourteenDays = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);

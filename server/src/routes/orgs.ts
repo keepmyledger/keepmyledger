@@ -100,14 +100,61 @@ export function orgsRouter({ storage = null }: OrgsRouterDeps = {}): Router {
     } catch (err) { next(err); }
   });
 
-  /** Delete a business (owner only). */
-  router.delete('/:orgId/businesses/:businessId', requireOrgOwner(), async (req: Request, res: Response, next: NextFunction) => {
+  /** Per-table row counts for the confirm-delete modal. Member-or-owner can read. */
+  router.get('/:orgId/businesses/:businessId/delete-preview', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const deleted = await req.ctx!.repos.businesses.delete(Number(req.params.businessId));
-      if (!deleted) {
+      const summary = await req.ctx!.repos.businesses.summarize(Number(req.params.businessId));
+      if (!summary) {
         res.status(404).json({ error: 'Business not found' });
         return;
       }
+      res.json(summary);
+    } catch (err) { next(err); }
+  });
+
+  /**
+   * Delete a business and all of its data (owner only). Destructive — requires
+   * the caller to pass `?confirm=<exact business name>` and refuses to leave the
+   * org with zero businesses. S3 receipts + logo are best-effort deleted after
+   * the DB transaction commits.
+   */
+  router.delete('/:orgId/businesses/:businessId', requireOrgOwner(), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const businessId = Number(req.params.businessId);
+      const business = await req.ctx!.repos.businesses.findById(businessId);
+      if (!business) {
+        res.status(404).json({ error: 'Business not found' });
+        return;
+      }
+
+      const confirm = typeof req.query.confirm === 'string' ? req.query.confirm : '';
+      if (confirm !== business.name) {
+        res.status(400).json({ error: 'Confirmation does not match the business name' });
+        return;
+      }
+
+      // Refuse to leave the org with zero businesses — the auth context picks an
+      // active business per request and that would brick the UI.
+      const all = await req.ctx!.repos.businesses.findAll();
+      if (all.length <= 1) {
+        res.status(400).json({ error: 'Cannot delete the only business in this org' });
+        return;
+      }
+
+      const result = await req.ctx!.repos.businesses.delete(businessId);
+      if (!result) {
+        res.status(404).json({ error: 'Business not found' });
+        return;
+      }
+
+      if (storage) {
+        // Best-effort: don't fail the response if any object is already gone.
+        if (result.logoStorageKey) storage.delete(result.logoStorageKey).catch(() => undefined);
+        for (const key of result.receiptStorageKeys) {
+          storage.delete(key).catch(() => undefined);
+        }
+      }
+
       res.status(204).send();
     } catch (err) { next(err); }
   });

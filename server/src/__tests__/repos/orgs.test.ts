@@ -109,14 +109,17 @@ describe('BusinessRepoImpl', () => {
     expect(await h.owner.businesses.rename(99999, 'Ghost')).toBeUndefined();
   });
 
-  it('delete removes the business and returns true', async () => {
+  it('delete removes the business and returns its storage keys', async () => {
     const biz = await h.owner.businesses.create('Temp');
-    expect(await h.owner.businesses.delete(biz.id)).toBe(true);
+    expect(await h.owner.businesses.delete(biz.id)).toEqual({
+      logoStorageKey: null,
+      receiptStorageKeys: [],
+    });
     expect(await h.owner.businesses.findById(biz.id)).toBeUndefined();
   });
 
-  it('delete returns false for an unknown id', async () => {
-    expect(await h.owner.businesses.delete(99999)).toBe(false);
+  it('delete returns null for an unknown id', async () => {
+    expect(await h.owner.businesses.delete(99999)).toBeNull();
   });
 
   it('findById returns undefined when the business belongs to a different org', async () => {

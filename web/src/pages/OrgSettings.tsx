@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { colors, radii, shadows } from '../styles/tokens';
+import { DeleteBusinessModal } from '../components/DeleteBusinessModal';
 import type { OrgMember, OrgInvite, Business } from '@keepmyledger/shared';
 
 const cardStyle: React.CSSProperties = {
@@ -74,6 +75,7 @@ export function OrgSettingsPage() {
   const [newBizName, setNewBizName] = useState('');
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [deletingBusiness, setDeletingBusiness] = useState<Business | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -178,10 +180,14 @@ export function OrgSettingsPage() {
     }
   };
 
-  const handleDeleteBusiness = async (id: number) => {
-    if (!orgId) return;
-    if (!confirm('Delete this business and all its data? This cannot be undone.')) return;
-    await api.businesses.delete(orgId, id).catch(() => {/* silent */});
+  const handleRequestDelete = (biz: Business) => {
+    setError(null);
+    setDeletingBusiness(biz);
+  };
+
+  const handleDeleted = () => {
+    setDeletingBusiness(null);
+    setSuccess('Business deleted');
     void load();
     void refreshAuth();
   };
@@ -375,7 +381,7 @@ export function OrgSettingsPage() {
                       <button
                         style={dangerButtonStyle}
                         type="button"
-                        onClick={() => { void handleDeleteBusiness(biz.id); }}
+                        onClick={() => handleRequestDelete(biz)}
                       >
                         Delete
                       </button>
@@ -401,6 +407,15 @@ export function OrgSettingsPage() {
           <button type="submit" style={primaryButtonStyle}>Add Business</button>
         </form>
       </div>
+
+      {deletingBusiness && orgId && (
+        <DeleteBusinessModal
+          orgId={orgId}
+          business={deletingBusiness}
+          onClose={() => setDeletingBusiness(null)}
+          onDeleted={handleDeleted}
+        />
+      )}
     </div>
   );
 }

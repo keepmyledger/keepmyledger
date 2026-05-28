@@ -146,6 +146,17 @@ describe('POST /orgs/:orgId/businesses', () => {
     expect(res.body.name).toBe('New Biz');
   });
 
+  it('seeds new businesses with category templates + auto-rules', async () => {
+    const app = makeOwnerApp(h);
+    const res = await request(app)
+      .post(`/orgs/${h.ownerOrgId}/businesses`)
+      .send({ name: 'Seeded' });
+    expect(res.status).toBe(201);
+    const summary = await h.owner.businesses.summarize(res.body.id);
+    expect(summary?.counts.categories).toBeGreaterThan(0);
+    expect(summary?.counts.rules).toBeGreaterThan(0);
+  });
+
   it('returns 403 for a non-owner', async () => {
     const app = makeMemberApp(h);
     const res = await request(app)
@@ -215,29 +226,107 @@ describe('PATCH /orgs/:orgId/businesses/:businessId', () => {
   });
 });
 
+describe('GET /orgs/:orgId/businesses/:businessId/delete-preview', () => {
+  let h: TestDb;
+
+  beforeEach(async () => { h = await makeTestDb(); });
+  afterEach(() => h.close());
+
+  it('returns the business and per-table counts', async () => {
+    const app = makeOwnerApp(h);
+    const res = await request(app).get(`/orgs/${h.ownerOrgId}/businesses/${h.ownerBusinessId}/delete-preview`);
+    expect(res.status).toBe(200);
+    expect(res.body.business?.id).toBe(h.ownerBusinessId);
+    expect(typeof res.body.counts?.categories).toBe('number');
+    // The owner's default business is seeded with categories + auto-rules.
+    expect(res.body.counts.categories).toBeGreaterThan(0);
+    expect(res.body.counts.rules).toBeGreaterThan(0);
+  });
+
+  it('returns 404 for an unknown business', async () => {
+    const app = makeOwnerApp(h);
+    const res = await request(app).get(`/orgs/${h.ownerOrgId}/businesses/99999/delete-preview`);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('DELETE /orgs/:orgId/businesses/:businessId', () => {
   let h: TestDb;
 
   beforeEach(async () => { h = await makeTestDb(); });
   afterEach(() => h.close());
 
-  it('deletes a business', async () => {
+  it('deletes a business when confirm matches', async () => {
     const app = makeOwnerApp(h);
     const biz = await h.owner.businesses.create('Temp');
-    const res = await request(app).delete(`/orgs/${h.ownerOrgId}/businesses/${biz.id}`);
+    const res = await request(app)
+      .delete(`/orgs/${h.ownerOrgId}/businesses/${biz.id}`)
+      .query({ confirm: 'Temp' });
     expect(res.status).toBe(204);
     expect(await h.owner.businesses.findById(biz.id)).toBeUndefined();
   });
 
+  it('cascades child rows on delete (categories + rules seeded by create)', async () => {
+    const app = makeOwnerApp(h);
+    const biz = await h.owner.businesses.create('Cascade Me');
+    // Verify the new business was seeded with categories + rules.
+    const summary = await h.owner.businesses.summarize(biz.id);
+    expect(summary?.counts.categories).toBeGreaterThan(0);
+    expect(summary?.counts.rules).toBeGreaterThan(0);
+
+    const res = await request(app)
+      .delete(`/orgs/${h.ownerOrgId}/businesses/${biz.id}`)
+      .query({ confirm: 'Cascade Me' });
+    expect(res.status).toBe(204);
+
+    const after = await h.owner.businesses.summarize(biz.id);
+    expect(after).toBeUndefined();
+  });
+
+  it('returns 400 when confirm is missing', async () => {
+    const app = makeOwnerApp(h);
+    const biz = await h.owner.businesses.create('Needs Confirm');
+    const res = await request(app).delete(`/orgs/${h.ownerOrgId}/businesses/${biz.id}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/confirm/i);
+    // Business is still there.
+    expect(await h.owner.businesses.findById(biz.id)).toBeDefined();
+  });
+
+  it('returns 400 when confirm does not match the business name', async () => {
+    const app = makeOwnerApp(h);
+    const biz = await h.owner.businesses.create('Strict Match');
+    const res = await request(app)
+      .delete(`/orgs/${h.ownerOrgId}/businesses/${biz.id}`)
+      .query({ confirm: 'strict match' });
+    expect(res.status).toBe(400);
+    expect(await h.owner.businesses.findById(biz.id)).toBeDefined();
+  });
+
+  it('refuses to delete the only business in an org', async () => {
+    const app = makeOwnerApp(h);
+    const only = await h.owner.businesses.findById(h.ownerBusinessId);
+    const res = await request(app)
+      .delete(`/orgs/${h.ownerOrgId}/businesses/${h.ownerBusinessId}`)
+      .query({ confirm: only!.name });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/only business/i);
+    expect(await h.owner.businesses.findById(h.ownerBusinessId)).toBeDefined();
+  });
+
   it('returns 404 for an unknown business', async () => {
     const app = makeOwnerApp(h);
-    const res = await request(app).delete(`/orgs/${h.ownerOrgId}/businesses/99999`);
+    const res = await request(app)
+      .delete(`/orgs/${h.ownerOrgId}/businesses/99999`)
+      .query({ confirm: 'whatever' });
     expect(res.status).toBe(404);
   });
 
   it('returns 403 for a non-owner', async () => {
     const app = makeMemberApp(h);
-    const res = await request(app).delete(`/orgs/${h.altOrgId}/businesses/${h.altBusinessId}`);
+    const res = await request(app)
+      .delete(`/orgs/${h.altOrgId}/businesses/${h.altBusinessId}`)
+      .query({ confirm: 'whatever' });
     expect(res.status).toBe(403);
   });
 });

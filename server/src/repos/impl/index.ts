@@ -60,7 +60,7 @@ export function createRepos(db: DbAdapter, userId: string, orgId: string, busine
     receipts: new ReceiptRepoImpl(db, businessId),
     aiUsage: new AiUsageRepoImpl(db, userId),
     subscription: new SubscriptionRepoImpl(db, orgId),
-    businesses: new BusinessRepoImpl(db, orgId),
+    businesses: new BusinessRepoImpl(db, orgId, userId),
     invites: new InviteRepoImpl(db, orgId, userId),
     org: new OrgRepoImpl(db, userId),
   };

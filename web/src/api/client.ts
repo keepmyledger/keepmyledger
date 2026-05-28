@@ -9,7 +9,7 @@ import type {
   AppConfig, User, ReceiptStoragePreference,
   AiSuggestion,
   PreviewResponse, CommitPayload, CsvColumnMapping,
-  Org, OrgMember, Business, OrgInvite,
+  Org, OrgMember, Business, BusinessSummary, OrgInvite,
   UnknownFormatSample, UnknownFormatStatus,
 } from '@keepmyledger/shared';
 
@@ -403,8 +403,12 @@ export const api = {
       request<Business>(`/orgs/${orgId}/businesses`, { method: 'POST', body: JSON.stringify({ name }) }),
     rename: (orgId: string, id: number, name: string) =>
       request<Business>(`/orgs/${orgId}/businesses/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
-    delete: (orgId: string, id: number) =>
-      request<void>(`/orgs/${orgId}/businesses/${id}`, { method: 'DELETE' }),
+    /** Per-table row counts shown in the confirm-delete modal. */
+    deletePreview: (orgId: string, id: number) =>
+      request<BusinessSummary>(`/orgs/${orgId}/businesses/${id}/delete-preview`),
+    /** Destructive. `confirm` must equal the business name exactly or the server returns 400. */
+    delete: (orgId: string, id: number, confirm: string) =>
+      request<void>(`/orgs/${orgId}/businesses/${id}?confirm=${encodeURIComponent(confirm)}`, { method: 'DELETE' }),
     /** Upload (or replace) a logo. Accepts PNG/JPEG/WebP, max 1 MB. */
     uploadLogo: async (orgId: string, id: number, file: File): Promise<Business> => {
       const form = new FormData();

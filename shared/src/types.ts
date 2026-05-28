@@ -58,6 +58,19 @@ export interface Business {
   logoContentType: string | null;
 }
 
+/** Returned by the delete-preview endpoint; drives the confirm-delete modal. */
+export interface BusinessSummary {
+  business: Business;
+  counts: {
+    accounts: number;
+    transactions: number;
+    receipts: number;
+    statements: number;
+    categories: number;
+    rules: number;
+  };
+}
+
 export type InviteStatus = 'pending' | 'accepted' | 'expired';
 
 export interface OrgInvite {
