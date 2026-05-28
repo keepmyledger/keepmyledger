@@ -6,11 +6,13 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer,
 } from 'recharts';
 import { colors as brand } from '../styles/tokens';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 // Pie palette: warm gold + green-led brand tones, no fintech blue.
-const COLORS = ['#2E7D61','#D4A72C','#9A6B12','#1F5C4A','#C97A4A','#8A5A20','#A8B86B','#5E5E5E'];
+const COLORS = [brand.forestGreen, brand.goldRich, brand.goldAntique, brand.ledgerGreen, '#C97A4A', brand.warningFg, '#A8B86B', brand.mutedGray];
 
 export function ReportsPage() {
+  useDocumentTitle('Reports');
   const [year, setYear] = useState(new Date().getFullYear());
   const [byCategory, setByCategory] = useState<ReportByCategoryRow[]>([]);
   const [cashflow, setCashflow] = useState<CashflowRow[]>([]);
@@ -29,13 +31,13 @@ export function ReportsPage() {
         <h1>Reports</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <label>Year <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 80 }} /></label>
-          <a href={api.reports.taxExportUrl(year)} download style={{ padding: '6px 12px', background: brand.forestGreen, color: '#fff', borderRadius: 6, textDecoration: 'none', fontWeight: 600 }}>
+          <a href={api.reports.taxExportUrl(year)} download style={{ padding: '6px 12px', background: brand.forestGreen, color: brand.warmWhite, borderRadius: 6, textDecoration: 'none', fontWeight: 600 }}>
             ⬇ Tax Export CSV
           </a>
           <a
             href={api.reports.transactionsExportUrl({ kind: 'expense', dateFrom: `${year}-01-01`, dateTo: `${year}-12-31` })}
             download
-            style={{ padding: '6px 12px', background: brand.goldAntique, color: '#fff', borderRadius: 6, textDecoration: 'none', fontWeight: 600 }}
+            style={{ padding: '6px 12px', background: brand.goldAntique, color: brand.warmWhite, borderRadius: 6, textDecoration: 'none', fontWeight: 600 }}
           >
             ⬇ Expenses CSV
           </a>
@@ -60,7 +62,7 @@ export function ReportsPage() {
         const ytdExpenses = cashflow.reduce((s, r) => s + r.expenses, 0);
         const ytdNet = cashflow.reduce((s, r) => s + r.net, 0);
         const fmt = (n: number) => `$${Math.abs(n).toFixed(2)}`;
-        const netColor = (n: number) => (n < 0 ? '#c00' : n > 0 ? '#080' : '#444');
+        const netColor = (n: number) => (n < 0 ? brand.goldAntique : n > 0 ? brand.forestGreen : brand.darkSlate);
         return (
           <div className="table-wrap" style={{ marginTop: 16 }}>
           <table style={{ ...tableStyle, minWidth: 420 }}>
@@ -76,8 +78,8 @@ export function ReportsPage() {
               {cashflow.map((r) => (
                 <tr key={r.period}>
                   <td style={{ padding: '4px 12px' }}>{r.period}</td>
-                  <td style={{ textAlign: 'right', padding: '4px 12px', color: '#080' }}>{fmt(r.income)}</td>
-                  <td style={{ textAlign: 'right', padding: '4px 12px', color: '#c00' }}>{fmt(r.expenses)}</td>
+                  <td style={{ textAlign: 'right', padding: '4px 12px', color: brand.forestGreen }}>{fmt(r.income)}</td>
+                  <td style={{ textAlign: 'right', padding: '4px 12px', color: brand.goldAntique }}>{fmt(r.expenses)}</td>
                   <td style={{ textAlign: 'right', padding: '4px 12px', color: netColor(r.net), fontWeight: 500 }}>
                     {r.net < 0 ? '-' : ''}{fmt(r.net)}
                   </td>
@@ -85,8 +87,8 @@ export function ReportsPage() {
               ))}
               <tr style={{ borderTop: '2px solid #444', fontWeight: 600 }}>
                 <td style={{ padding: '6px 12px' }}>YTD</td>
-                <td style={{ textAlign: 'right', padding: '6px 12px', color: '#080' }}>{fmt(ytdIncome)}</td>
-                <td style={{ textAlign: 'right', padding: '6px 12px', color: '#c00' }}>{fmt(ytdExpenses)}</td>
+                <td style={{ textAlign: 'right', padding: '6px 12px', color: brand.forestGreen }}>{fmt(ytdIncome)}</td>
+                <td style={{ textAlign: 'right', padding: '6px 12px', color: brand.goldAntique }}>{fmt(ytdExpenses)}</td>
                 <td style={{ textAlign: 'right', padding: '6px 12px', color: netColor(ytdNet) }}>
                   {ytdNet < 0 ? '-' : ''}{fmt(ytdNet)}
                 </td>
@@ -115,7 +117,7 @@ export function ReportsPage() {
               {expenses.sort((a, b) => a.total - b.total).map((r) => (
                 <tr key={r.categoryId ?? 'null'}>
                   <td>{r.categoryName ?? 'Uncategorized'}</td>
-                  <td style={{ textAlign: 'right', color: '#c00' }}>-${Math.abs(r.total).toFixed(2)}</td>
+                  <td style={{ textAlign: 'right', color: brand.goldAntique }}>-${Math.abs(r.total).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -123,7 +125,7 @@ export function ReportsPage() {
           </div>
         </div>
       ) : (
-        <p style={{ color: '#888' }}>No expense data for {year}.</p>
+        <p style={{ color: brand.mutedGray }}>No expense data for {year}.</p>
       )}
     </div>
   );

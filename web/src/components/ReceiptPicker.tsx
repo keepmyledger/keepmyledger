@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Receipt, DriveAuthStatus } from '@keepmyledger/shared';
+import type { Receipt, DriveAuthStatus, ReceiptStoragePreference } from '@keepmyledger/shared';
 import { api } from '../api/client';
+import { receiptView } from '../utils/receipt';
+import { useAuth } from '../auth/AuthContext';
+import brandConfig from '@content/brand/config';
 
 interface Props {
   transactionId: number;
@@ -12,6 +15,7 @@ interface Props {
 type Tab = 'linked' | 'upload' | 'existing';
 
 export function ReceiptPicker({ transactionId, linkedReceipts, onClose, onChanged }: Props) {
+  const { config, user } = useAuth();
   const [tab, setTab] = useState<Tab>('linked');
   const [driveStatus, setDriveStatus] = useState<DriveAuthStatus | null>(null);
   const [allReceipts, setAllReceipts] = useState<Receipt[]>([]);
@@ -23,6 +27,11 @@ export function ReceiptPicker({ transactionId, linkedReceipts, onClose, onChange
     api.receipts.driveStatus().then(setDriveStatus).catch(() => {});
     api.receipts.list().then(setAllReceipts).catch(() => {});
   }, []);
+
+  // Where uploads from this picker will land — honours the user's preference
+  // and falls back to the deployment default.
+  const effectiveBackend: ReceiptStoragePreference =
+    user?.receiptStoragePreference ?? config?.defaultReceiptStorage ?? 'drive';
 
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -99,37 +108,48 @@ export function ReceiptPicker({ transactionId, linkedReceipts, onClose, onChange
         {tab === 'linked' && (
           <div>
             {linkedReceipts.length === 0 && <div style={{ color: '#888', fontSize: 13 }}>No receipts linked yet.</div>}
-            {linkedReceipts.map((r) => (
-              <div key={r.id} style={receiptRow}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {r.driveWebViewLink
-                    ? <a href={r.driveWebViewLink} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{r.driveFileName}</a>
-                    : <span style={{ fontSize: 13 }}>{r.driveFileName}</span>}
-                  <div style={{ fontSize: 11, color: '#888' }}>{r.driveMimeType} · {r.uploadedAt.slice(0, 10)}</div>
+            {linkedReceipts.map((r) => {
+              const v = receiptView(r);
+              return (
+                <div key={r.id} style={receiptRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {v.href
+                      ? <a href={v.href} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{v.name}</a>
+                      : <span style={{ fontSize: 13 }}>{v.name}</span>}
+                    <div style={{ fontSize: 11, color: '#888' }}>{v.contentType} · {r.uploadedAt.slice(0, 10)}</div>
+                  </div>
+                  <button onClick={() => void handleUnlink(r.id)} style={smallBtn}>Unlink</button>
                 </div>
-                <button onClick={() => void handleUnlink(r.id)} style={smallBtn}>Unlink</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         {/* Upload tab */}
         {tab === 'upload' && (
           <div>
-            {!driveStatus?.configured && (
+            {effectiveBackend === 'kml' ? (
+              <div style={{ color: '#1F5C4A', background: '#E7F1EA', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
+                Files will upload to <strong>{brandConfig.name} storage</strong>. Change this in{' '}
+                <a href="/settings">Settings → Receipt storage</a> to use your own Google Drive instead.
+              </div>
+            ) : !driveStatus?.configured ? (
               <div style={{ color: '#8A5A20', background: '#FBEFD0', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
                 Google Drive is not configured. Set <code>GOOGLE_OAUTH_CLIENT_ID</code> and <code>GOOGLE_OAUTH_CLIENT_SECRET</code> in your server <code>.env</code> file to enable Drive uploads.
               </div>
-            )}
-            {driveStatus?.configured && !driveStatus.authenticated && (
+            ) : !driveStatus.authenticated ? (
               <div style={{ color: '#8A5A20', background: '#FBEFD0', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
                 Not connected to Google Drive.{' '}
                 <a href="/api/receipts/drive/auth" onClick={async (e) => { e.preventDefault(); const { url } = await api.receipts.driveAuthUrl(); window.open(url, '_blank'); }}>
                   Connect Google Drive
                 </a>
                 <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-                  Files will be uploaded to a folder named <strong>KeepMyLedger Receipts</strong> in your Drive.
+                  Files will be uploaded to a folder named <strong>{brandConfig.name} Receipts</strong> in your Drive.
                 </div>
+              </div>
+            ) : (
+              <div style={{ color: '#1F5C4A', background: '#E7F1EA', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
+                Files will upload to <strong>your Google Drive</strong> (folder: {brandConfig.name} Receipts).
               </div>
             )}
             <div
@@ -154,22 +174,25 @@ export function ReceiptPicker({ transactionId, linkedReceipts, onClose, onChange
         {tab === 'existing' && (
           <div>
             {allReceipts.length === 0 && <div style={{ fontSize: 13, color: '#888' }}>No receipts in database yet.</div>}
-            {allReceipts.map((r) => (
-              <div key={r.id} style={receiptRow}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {r.driveWebViewLink
-                    ? <a href={r.driveWebViewLink} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{r.driveFileName}</a>
-                    : <span style={{ fontSize: 13 }}>{r.driveFileName}</span>}
-                  <div style={{ fontSize: 11, color: '#888' }}>{r.driveMimeType} · {r.uploadedAt.slice(0, 10)}</div>
+            {allReceipts.map((r) => {
+              const v = receiptView(r);
+              return (
+                <div key={r.id} style={receiptRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {v.href
+                      ? <a href={v.href} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{v.name}</a>
+                      : <span style={{ fontSize: 13 }}>{v.name}</span>}
+                    <div style={{ fontSize: 11, color: '#888' }}>{v.contentType} · {r.uploadedAt.slice(0, 10)}</div>
+                  </div>
+                  <button
+                    onClick={() => linkedIds.has(r.id) ? void handleUnlink(r.id) : void handleLinkExisting(r)}
+                    style={{ ...smallBtn, background: linkedIds.has(r.id) ? '#e8f5e9' : undefined }}
+                  >
+                    {linkedIds.has(r.id) ? 'Unlink' : 'Link'}
+                  </button>
                 </div>
-                <button
-                  onClick={() => linkedIds.has(r.id) ? void handleUnlink(r.id) : void handleLinkExisting(r)}
-                  style={{ ...smallBtn, background: linkedIds.has(r.id) ? '#e8f5e9' : undefined }}
-                >
-                  {linkedIds.has(r.id) ? 'Unlink' : 'Link'}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

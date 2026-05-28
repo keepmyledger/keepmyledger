@@ -2,14 +2,25 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { Rule, Account, Category, CreateRulePayload, UpdateRulePayload, PatternKind } from '@keepmyledger/shared';
 import { api } from '../api/client';
 import { CategoryCombobox } from '../components/CategoryCombobox';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { ConfirmModal } from '../components/ConfirmModal';
+import {
+  filterBarStyle, fieldStyle, inputStyle, labelStyle,
+  tableWrapStyle, tableStyle, thStyle, tdStyle,
+  buttonStyle, primaryButtonStyle, smallButtonStyle,
+  modalBackdropStyle, modalStyle,
+} from '../styles/table';
+import { colors, radii } from '../styles/tokens';
 
 type FormState = Partial<CreateRulePayload>;
 
 export function RulesPage() {
+  useDocumentTitle('Rules');
   const [rules, setRules] = useState<Rule[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [editing, setEditing] = useState<Rule | 'new' | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [applyMsg, setApplyMsg] = useState<Record<number, string>>({});
 
@@ -20,9 +31,11 @@ export function RulesPage() {
   };
   useEffect(load, []);
 
-  const del = async (id: number) => {
-    if (!confirm('Delete this rule?')) return;
-    await api.rules.delete(id);
+  const del = (id: number) => setConfirmDeleteId(id);
+  const doDelete = async () => {
+    if (confirmDeleteId === null) return;
+    await api.rules.delete(confirmDeleteId);
+    setConfirmDeleteId(null);
     load();
   };
 
@@ -52,7 +65,7 @@ export function RulesPage() {
         <h1 style={{ margin: 0 }}>Categorization Rules</h1>
         <button style={primaryButtonStyle} onClick={() => setEditing('new')}>+ Add Rule</button>
       </div>
-      <p style={{ color: '#555', marginTop: 8 }}>
+      <p style={{ color: colors.mutedGray, marginTop: 8 }}>
         Rules are applied in priority order (highest first) to auto-assign categories to imported transactions.
       </p>
 
@@ -66,7 +79,7 @@ export function RulesPage() {
             style={inputStyle}
           />
         </label>
-        <span style={{ alignSelf: 'flex-end', color: '#666', fontSize: 13, paddingBottom: 8 }}>
+        <span style={{ alignSelf: 'flex-end', color: colors.mutedGray, fontSize: 13, paddingBottom: 8 }}>
           {filtered.length} of {rules.length} rule{rules.length === 1 ? '' : 's'}
         </span>
       </div>
@@ -88,7 +101,7 @@ export function RulesPage() {
           </thead>
           <tbody>
             {filtered.map((r, idx) => (
-              <tr key={r.id} style={{ background: idx % 2 === 0 ? '#fff' : '#fafbfc', borderBottom: '1px solid #eee' }}>
+              <tr key={r.id} style={{ background: idx % 2 === 0 ? colors.warmWhite : colors.cream, borderBottom: `1px solid ${colors.softLine}` }}>
                 <td style={tdStyle}>{r.name}</td>
                 <td style={tdStyle}><code style={codeStyle}>{r.descriptionPattern}</code></td>
                 <td style={tdStyle}>
@@ -96,14 +109,14 @@ export function RulesPage() {
                     {r.patternKind}
                   </span>
                 </td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: r.amountMin == null && r.amountMax == null ? '#bbb' : '#333' }}>
+                <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: r.amountMin == null && r.amountMax == null ? colors.hintText : colors.darkSlate }}>
                   {r.amountMin == null && r.amountMax == null
                     ? '—'
                     : `${r.amountMin ?? '−∞'} … ${r.amountMax ?? '+∞'}`}
                 </td>
-                <td style={{ ...tdStyle, color: r.accountId == null ? '#888' : '#333' }}>{accName(r.accountId)}</td>
+                <td style={{ ...tdStyle, color: r.accountId == null ? colors.hintText : colors.darkSlate }}>{accName(r.accountId)}</td>
                 <td style={tdStyle}>{catName(r.categoryId)}</td>
-                <td style={{ ...tdStyle, color: r.taxDescription ? '#333' : '#bbb', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.taxDescription ?? ''}>
+                <td style={{ ...tdStyle, color: r.taxDescription ? colors.darkSlate : colors.hintText, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.taxDescription ?? ''}>
                   {r.taxDescription ?? '—'}
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.priority}</td>
@@ -111,14 +124,14 @@ export function RulesPage() {
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                     <button style={smallButtonStyle} onClick={() => setEditing(r)}>Edit</button>
                     <button style={smallButtonStyle} onClick={() => void apply(r.id)}>Apply</button>
-                    <button style={{ ...smallButtonStyle, color: '#a52a2a' }} onClick={() => void del(r.id)}>Delete</button>
-                    {applyMsg[r.id] && <span style={{ color: 'green', fontSize: 11 }}>{applyMsg[r.id]}</span>}
+                    <button style={{ ...smallButtonStyle, color: colors.dangerFg }} onClick={() => void del(r.id)}>Delete</button>
+                    {applyMsg[r.id] && <span style={{ color: colors.forestGreen, fontSize: 11 }}>{applyMsg[r.id]}</span>}
                   </div>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ ...tdStyle, color: '#888', textAlign: 'center', padding: 24 }}>
+              <tr><td colSpan={9} style={{ ...tdStyle, color: colors.mutedGray, textAlign: 'center', padding: 24 }}>
                 {rules.length === 0 ? 'No rules yet.' : 'No rules match your search.'}
               </td></tr>
             )}
@@ -133,6 +146,13 @@ export function RulesPage() {
           categories={categories}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+      {confirmDeleteId !== null && (
+        <ConfirmModal
+          message="Delete this rule?"
+          onConfirm={() => void doDelete()}
+          onCancel={() => setConfirmDeleteId(null)}
         />
       )}
     </div>
@@ -208,7 +228,7 @@ function RuleEditorModal({
       <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
         <h3 style={{ marginTop: 0 }}>{isEdit ? 'Edit Rule' : 'New Rule'}</h3>
         <form onSubmit={(e) => void submit(e)} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {error && <div style={{ color: '#9A2D20', background: '#FBE8E2', padding: 10, borderRadius: 6 }}>{error}</div>}
+          {error && <div style={{ color: colors.dangerFg, background: colors.dangerBg, padding: 10, borderRadius: 6 }}>{error}</div>}
           <label style={labelStyle}>Rule Name
             <input style={inputStyle} value={form.name ?? ''} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           </label>
@@ -254,7 +274,7 @@ function RuleEditorModal({
               onChange={(e) => setForm({ ...form, taxDescription: e.target.value || null })}
               placeholder="e.g. Office supplies"
             />
-            <small style={{ color: '#666', marginTop: 2, fontWeight: 400 }}>
+            <small style={{ color: colors.mutedGray, marginTop: 2, fontWeight: 400 }}>
               Applied to matching transactions that don't already have a tax description.
             </small>
           </label>
@@ -268,59 +288,12 @@ function RuleEditorModal({
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────────────────
-const filterBarStyle: React.CSSProperties = {
-  display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
-  background: '#F7F3E8', border: '1px solid #E6DFCB', borderRadius: 10, padding: 12, marginBottom: 12,
-};
-const fieldStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 4,
-  fontSize: 11, color: '#5E5E5E', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600,
-};
-const inputStyle: React.CSSProperties = {
-  padding: '6px 10px', border: '1px solid #E1DACB', borderRadius: 6,
-  fontSize: 14, background: '#FFFDF8', textTransform: 'none', letterSpacing: 'normal', fontWeight: 400, color: '#2B2B2B',
-};
-const labelStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 4,
-  fontSize: 12, color: '#5E5E5E', fontWeight: 600,
-};
-const tableWrapStyle: React.CSSProperties = {
-  border: '1px solid #E6DFCB', borderRadius: 10, overflow: 'hidden',
-  boxShadow: '0 1px 2px rgba(31,41,32,0.05)', background: '#FFFDF8',
-};
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '10px 12px', background: '#F7F3E8',
-  borderBottom: '1px solid #E6DFCB', fontSize: 11, fontWeight: 600,
-  color: '#5E5E5E', textTransform: 'uppercase', letterSpacing: 0.5, position: 'sticky', top: 0,
-};
-const tdStyle: React.CSSProperties = { padding: '8px 12px', verticalAlign: 'middle' };
+// ── Rules-specific styles ───────────────────────────────────────────────────
 const codeStyle: React.CSSProperties = {
-  background: '#EFE8D4', padding: '2px 6px', borderRadius: 4,
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, color: '#2B2B2B',
-};
-const buttonStyle: React.CSSProperties = {
-  padding: '6px 14px', border: '1px solid #E1DACB', borderRadius: 6,
-  background: '#FFFDF8', cursor: 'pointer', fontSize: 14, color: '#2B2B2B',
-};
-const primaryButtonStyle: React.CSSProperties = {
-  ...buttonStyle, background: '#2E7D61', color: '#fff', border: '1px solid #2E7D61', fontWeight: 600,
-};
-const smallButtonStyle: React.CSSProperties = {
-  padding: '3px 8px', border: '1px solid #E1DACB', borderRadius: 6,
-  background: '#FFFDF8', cursor: 'pointer', fontSize: 12, color: '#2B2B2B',
+  background: colors.creamDeep, padding: '2px 6px', borderRadius: radii.sm,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, color: colors.darkSlate,
 };
 const pillStyles: Record<PatternKind, React.CSSProperties> = {
-  substring: { background: '#E7F1EA', color: '#1F5C4A', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500 },
-  regex:     { background: '#FBEFD0', color: '#8A5A20', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500 },
-};
-const modalBackdropStyle: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(43,43,43,0.45)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-};
-const modalStyle: React.CSSProperties = {
-  background: '#FFFDF8', borderRadius: 14, padding: 20,
-  width: 480, maxWidth: '92vw', maxHeight: '90vh', overflow: 'auto',
-  boxShadow: '0 12px 40px rgba(31,41,32,0.22)', border: '1px solid #E6DFCB',
+  substring: { background: colors.successBg, color: colors.successFg, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500 },
+  regex:     { background: colors.warningBg, color: colors.warningFg, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500 },
 };

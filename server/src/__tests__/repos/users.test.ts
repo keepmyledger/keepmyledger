@@ -21,8 +21,8 @@ describe('SqliteUserRepo', () => {
 
   it('provisionDefaults is idempotent', async () => {
     const u = await h.userRepo.create({ email: 'd@e.f', name: 'D' });
-    await h.userRepo.provisionDefaults(u.id);
-    const repos1 = (await import('../../repos/impl')).createRepos(h.db, u.id);
+    const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id);
+    const repos1 = (await import('../../repos/impl')).createRepos(h.db, u.id, orgId, businessId);
     const cats1 = await repos1.categories.findAll();
     const rules1 = await repos1.rules.findAll();
     await h.userRepo.provisionDefaults(u.id);
@@ -32,10 +32,29 @@ describe('SqliteUserRepo', () => {
     expect(rules2.length).toBe(rules1.length);
   });
 
+  it('provisionDefaults uses an explicit businessName when supplied', async () => {
+    const u = await h.userRepo.create({ email: 'biz@e.f', name: 'B' });
+    const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id, 'Acme LLC');
+    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id, orgId, businessId);
+    const biz = await repos.businesses.findById(businessId);
+    expect(biz?.name).toBe('Acme LLC');
+    // Org name is auto-derived from business name so the UI doesn't show "Personal".
+    const orgRow = await h.db.get<{ name: string }>('SELECT name FROM organizations WHERE id = ?', [orgId]);
+    expect(orgRow?.name).toBe('Acme LLC');
+  });
+
+  it('provisionDefaults falls back to "Personal" when no businessName is supplied', async () => {
+    const u = await h.userRepo.create({ email: 'oauth@e.f', name: 'O' });
+    const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id);
+    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id, orgId, businessId);
+    const biz = await repos.businesses.findById(businessId);
+    expect(biz?.name).toBe('Personal');
+  });
+
   it('provisionDefaults seeds auto-rules pointing at the user\'s own categories', async () => {
     const u = await h.userRepo.create({ email: 'r@e.f', name: 'R' });
-    await h.userRepo.provisionDefaults(u.id);
-    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id);
+    const { orgId, businessId } = await h.userRepo.provisionDefaults(u.id);
+    const repos = (await import('../../repos/impl')).createRepos(h.db, u.id, orgId, businessId);
     const rules = await repos.rules.findAll();
     const cats = await repos.categories.findAll();
     const catById = new Map(cats.map((c) => [c.id, c]));
@@ -51,5 +70,19 @@ describe('SqliteUserRepo', () => {
     for (const r of rules) {
       expect(catById.has(r.categoryId)).toBe(true);
     }
+  });
+
+  it('receiptStoragePreference defaults to null and round-trips through set+findById', async () => {
+    const u = await h.userRepo.create({ email: 's@t.u', name: 'S' });
+    expect(u.receiptStoragePreference).toBeNull();
+
+    await h.userRepo.setReceiptStoragePreference(u.id, 'kml');
+    expect((await h.userRepo.findById(u.id))?.receiptStoragePreference).toBe('kml');
+
+    await h.userRepo.setReceiptStoragePreference(u.id, 'drive');
+    expect((await h.userRepo.findById(u.id))?.receiptStoragePreference).toBe('drive');
+
+    await h.userRepo.setReceiptStoragePreference(u.id, null);
+    expect((await h.userRepo.findById(u.id))?.receiptStoragePreference).toBeNull();
   });
 });

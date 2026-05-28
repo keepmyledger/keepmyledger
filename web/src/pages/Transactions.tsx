@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Transaction, Account, Category, Receipt, CategoryKind, PatternKind } from '@keepmyledger/shared';
 import { api } from '../api/client';
@@ -6,10 +6,16 @@ import { ReceiptPicker } from '../components/ReceiptPicker';
 import { CategoryCombobox } from '../components/CategoryCombobox';
 import { AiAssistModal } from '../components/AiAssistModal';
 import { EditTransactionModal } from '../components/EditTransactionModal';
+import { SplitModal } from '../components/SplitModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { useAuth } from '../auth/AuthContext';
 import { useSetting } from '../settings';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { receiptView } from '../utils/receipt';
+import { colors } from '../styles/tokens';
 
 export function TransactionsPage() {
+  useDocumentTitle('Transactions');
   const { config } = useAuth();
   const aiEnabled = config?.aiAssistEnabled ?? false;
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -21,7 +27,9 @@ export function TransactionsPage() {
   const [createRuleForTx, setCreateRuleForTx] = useState<Transaction | null>(null);
   const [aiAssistTx, setAiAssistTx] = useState<Transaction | null>(null);
   const [editTx, setEditTx] = useState<Transaction | null>(null);
+  const [splitTx, setSplitTx] = useState<Transaction | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<Transaction | 'bulk' | null>(null);
 
   // Filters
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,10 +57,23 @@ export function TransactionsPage() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const [defaultPageSize] = useSetting('transactionsPageSize');
+  const [defaultPageSize, setDefaultPageSize] = useSetting('transactionsPageSize');
   const [pageSize, setPageSize] = useState(defaultPageSize);
-  // Follow the default when it changes (e.g. user updates it in Settings)
+  const [gearOpen, setGearOpen] = useState(false);
+  const gearRef = useRef<HTMLDivElement>(null);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  // Follow the default when it changes
   useEffect(() => { setPageSize(defaultPageSize); }, [defaultPageSize]);
+  // Close gear popover on outside click
+  useEffect(() => {
+    if (!gearOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (gearRef.current && !gearRef.current.contains(e.target as Node)) setGearOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [gearOpen]);
 
   const load = useCallback(async () => {
     const params: Record<string, string | number | boolean> = {};
@@ -91,16 +112,29 @@ export function TransactionsPage() {
     });
   };
 
-  const deleteOne = async (tx: Transaction) => {
-    if (!window.confirm(`Delete "${tx.description}" (${tx.date}, $${Math.abs(tx.amount).toFixed(2)})?`)) return;
-    await api.transactions.delete(tx.id);
-    void load();
+  const toggleExpand = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   };
 
-  const deleteSelected = async () => {
+  const deleteOne = (tx: Transaction) => setConfirmDelete(tx);
+
+  const deleteSelected = () => {
     if (selectedIds.size === 0) return;
-    if (!window.confirm(`Delete ${selectedIds.size} selected transaction${selectedIds.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
-    await api.transactions.bulkDelete([...selectedIds]);
+    setConfirmDelete('bulk');
+  };
+
+  const doDelete = async () => {
+    if (confirmDelete === null) return;
+    if (confirmDelete === 'bulk') {
+      await api.transactions.bulkDelete([...selectedIds]);
+    } else {
+      await api.transactions.delete(confirmDelete.id);
+    }
+    setConfirmDelete(null);
     void load();
   };
 
@@ -159,10 +193,10 @@ export function TransactionsPage() {
   const sourceBadge = (source: string | null) => {
     if (!source || source === 'suggested') return null;
     const styles: Record<string, React.CSSProperties> = {
-      manual: { background: '#E7F1EA', color: '#1F5C4A' },
-      rule:   { background: '#FBEFD0', color: '#8A5A20' },
+      manual: { background: colors.successBg, color: colors.successFg },
+      rule:   { background: colors.warningBg, color: colors.warningFg },
     };
-    const s = styles[source] ?? { background: '#EFE8D4', color: '#5E5E5E' };
+    const s = styles[source] ?? { background: colors.creamDeep, color: colors.mutedGray };
     return (
       <span style={{ ...s, padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 500 }}>
         {source}
@@ -174,11 +208,18 @@ export function TransactionsPage() {
     <div>
       <h1>Transactions</h1>
 
-      {/* Filters */}
-      <div style={filterBarStyle}>
+      {/* Primary filters */}
+      <div style={{ ...filterBarStyle, marginBottom: filterPanelOpen ? 4 : 8 }}>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search description, category…"
+          style={{ ...inputStyle, flex: 1, minWidth: 180 }}
+        />
         <label style={fieldStyle}>Account
           <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} style={inputStyle}>
-            <option value="">All</option>
+            <option value="">All accounts</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </label>
@@ -188,45 +229,23 @@ export function TransactionsPage() {
         <label style={fieldStyle}>To
           <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={inputStyle} />
         </label>
-        <label style={fieldStyle}>Source
-          <select value={filterSource} onChange={(e) => setFilterSource(e.target.value)} style={inputStyle}>
-            <option value="">All</option>
-            <option value="rule">Rule</option>
-            <option value="manual">Manual</option>
-            <option value="suggested">Suggested</option>
-          </select>
-        </label>
-        <label style={fieldStyle}>Receipts
-          <select value={filterReceipt} onChange={(e) => setFilterReceipt(e.target.value)} style={inputStyle}>
-            <option value="">All</option>
-            <option value="true">Has receipts</option>
-            <option value="false">No receipts</option>
-          </select>
-        </label>
-        <label style={{ ...fieldStyle, flex: 1, minWidth: 180 }}>Search
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Description, category, tax code, tax desc…"
-            style={inputStyle}
-          />
-        </label>
         <label style={{ ...fieldStyle, alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 6 }}>
           <input type="checkbox" checked={filterUncategorized} onChange={(e) => setFilterUncategorized(e.target.checked)} />
-          Uncategorized only
+          Uncategorized
         </label>
-        <label style={{ ...fieldStyle, alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 6 }}>
-          <input type="checkbox" checked={filterMissingTaxDesc} onChange={(e) => setFilterMissingTaxDesc(e.target.checked)} />
-          Missing tax description
-        </label>
-        <button onClick={() => void load()} style={buttonStyle}>Refresh</button>
+        <button
+          onClick={() => setFilterPanelOpen((o) => !o)}
+          style={{ ...buttonStyle, alignSelf: 'flex-end', ...(filterPanelOpen ? { background: colors.successBg, borderColor: colors.forestGreen, color: colors.successFg } : {}) }}
+          title="More filters"
+        >
+          {filterPanelOpen ? '⊟ Less' : '⊞ More'}
+        </button>
         {selectedIds.size > 0 && (
           <button
             onClick={() => void deleteSelected()}
-            style={{ ...buttonStyle, background: '#9A2D20', color: '#fff', borderColor: '#9A2D20' }}
+            style={{ ...buttonStyle, alignSelf: 'flex-end', background: colors.dangerFg, color: colors.warmWhite, borderColor: colors.dangerFg }}
           >
-            Delete selected ({selectedIds.size})
+            Delete ({selectedIds.size})
           </button>
         )}
         <button
@@ -240,28 +259,75 @@ export function TransactionsPage() {
             if (filterUncategorized) params.uncategorized = true;
             window.location.href = api.reports.transactionsExportUrl(params);
           }}
-          style={buttonStyle}
-          title="Download the currently-filtered transactions as CSV (search/missing-tax-desc filters apply only in-app)"
+          style={{ ...buttonStyle, alignSelf: 'flex-end' }}
+          title="Export filtered transactions as CSV"
         >
-          ⬇ Export CSV
+          ⬇ CSV
         </button>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, color: '#555', fontSize: 13 }}>
+      {/* Secondary filters */}
+      {filterPanelOpen && (
+        <div style={{ ...filterBarStyle, marginBottom: 8, padding: '8px 12px', background: colors.cream, borderRadius: 6, border: `1px solid ${colors.softLine}` }}>
+          <label style={fieldStyle}>Source
+            <select value={filterSource} onChange={(e) => setFilterSource(e.target.value)} style={inputStyle}>
+              <option value="">All</option>
+              <option value="rule">Rule</option>
+              <option value="manual">Manual</option>
+              <option value="suggested">Suggested</option>
+            </select>
+          </label>
+          <label style={fieldStyle}>Receipts
+            <select value={filterReceipt} onChange={(e) => setFilterReceipt(e.target.value)} style={inputStyle}>
+              <option value="">All</option>
+              <option value="true">Has receipts</option>
+              <option value="false">No receipts</option>
+            </select>
+          </label>
+          <label style={{ ...fieldStyle, alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 6 }}>
+            <input type="checkbox" checked={filterMissingTaxDesc} onChange={(e) => setFilterMissingTaxDesc(e.target.checked)} />
+            Missing tax description
+          </label>
+          <button onClick={() => void load()} style={{ ...buttonStyle, alignSelf: 'flex-end' }}>↺ Refresh</button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, color: colors.mutedGray, fontSize: 13 }}>
         <span>
           {filtered.length === 0
             ? 'No transactions'
             : `Showing ${pageStart + 1}–${Math.min(pageStart + pageSize, filtered.length)} of ${filtered.length}`}
           {search && transactions.length !== filtered.length && (
-            <span style={{ color: '#888' }}> (filtered from {transactions.length})</span>
+            <span style={{ color: colors.hintText }}> (filtered from {transactions.length})</span>
           )}
         </span>
-        <span>
-          Page size:&nbsp;
-          <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} style={{ ...inputStyle, padding: '2px 6px' }}>
-            {[10, 25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </span>
+        <div ref={gearRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setGearOpen((o) => !o)}
+            title="Table settings"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.hintText, fontSize: 16, lineHeight: 1, padding: '2px 4px', borderRadius: 4 }}
+          >
+            ⚙
+          </button>
+          {gearOpen && (
+            <div style={{
+              position: 'absolute', right: 0, top: '100%', marginTop: 4,
+              background: colors.warmWhite, borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              border: `1px solid ${colors.softLine}`, padding: '12px 16px', zIndex: 100, minWidth: 160,
+            }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+                <span style={{ fontWeight: 500, color: colors.mutedGray }}>Rows per page</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { const n = Number(e.target.value); setPageSize(n); setDefaultPageSize(n); setGearOpen(false); }}
+                  style={{ ...inputStyle, padding: '4px 8px' }}
+                >
+                  {[10, 25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="desktop-only table-wrap" style={tableWrapStyle}>
@@ -288,9 +354,6 @@ export function TransactionsPage() {
             <th style={thStyle}>Description</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
             <th style={thStyle}>Category</th>
-            <th style={thStyle}>Tax Description</th>
-            <th style={thStyle}>Source</th>
-            <th style={thStyle}>Receipts</th>
             <th style={thStyle}>Actions</th>
           </tr>
         </thead>
@@ -300,121 +363,118 @@ export function TransactionsPage() {
             const isUncategorized = tx.categoryId == null;
             const isTransfer = isTransferCategory(tx.categoryId);
             const isSuggested = tx.categorySource === 'suggested';
+            const isExpanded = expandedIds.has(tx.id);
             const rowBase: React.CSSProperties = {
-              borderBottom: '1px solid #eee',
-              background: idx % 2 === 0 ? '#FFFDF8' : '#F7F3E8',
+              borderBottom: `1px solid ${colors.softLine}`,
+              background: idx % 2 === 0 ? colors.warmWhite : colors.cream,
             };
             const rowStyle: React.CSSProperties = isUncategorized
-              ? { ...rowBase, background: '#FBE8E2', borderLeft: '3px solid #9A2D20' }
+              ? { ...rowBase, background: colors.dangerBg, borderLeft: `3px solid ${colors.dangerFg}` }
               : isTransfer
-                ? { ...rowBase, background: '#EFE8D4', color: '#5E5E5E' }
+                ? { ...rowBase, background: colors.creamDeep, color: colors.mutedGray }
                 : isSuggested
-                  ? { ...rowBase, background: '#FBEFD0' }
+                  ? { ...rowBase, background: colors.warningBg }
                   : rowBase;
             return (
-              <tr key={tx.id} style={rowStyle}>
-                <td style={{ ...tdStyle, width: 32 }}>
-                  <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} />
-                </td>
-                <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: '#555' }}>{tx.date}</td>
-                <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: '#666', fontSize: 12 }}>{accName(tx.accountId)}</td>
-                <td style={{ ...tdStyle, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis' }} title={tx.description}>
-                  {tx.description}
-                </td>
-                <td style={{ ...tdStyle, color: tx.amount < 0 ? '#c0392b' : '#2a8a3e', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                  {tx.amount < 0 ? '−' : '+'}${Math.abs(tx.amount).toFixed(2)}
-                </td>
-                <td style={tdStyle}>
-                  <CategoryCombobox
-                    categories={categories}
-                    value={tx.categoryId}
-                    onChange={(id) => { if (id != null) void updateCategory(tx, id); }}
-                    onCreateNew={() => setCreateCatForTx(tx)}
-                    invalid={isUncategorized}
-                    width={190}
-                  />
-                </td>
-                <td style={tdStyle}>
-                  <input
-                    type="text"
-                    defaultValue={tx.taxDescription ?? ''}
-                    placeholder="Business purpose"
-                    onBlur={(e) => void saveTaxDescription(tx, e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    style={{ ...inputStyle, width: 190, fontSize: 12 }}
-                    title="Justification for this expense in case of an audit"
-                  />
-                </td>
-                <td style={tdStyle}>
-                  {isSuggested
-                    ? <span title={`Suggested: ${catName(tx.suggestedCategoryId)}`} style={{ background: '#FBEFD0', color: '#8A5A20', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500 }}>⚡ suggested</span>
-                    : sourceBadge(tx.categorySource) ?? <span style={{ color: '#bbb', fontSize: 11 }}>—</span>}
-                </td>
-                <td style={{ ...tdStyle, fontSize: 12 }}>
-                  {txReceipts.length > 0 && (
-                    <div style={{ marginBottom: 3 }}>
-                      {txReceipts.map((r) =>
-                        r.driveWebViewLink
-                          ? <a key={r.id} href={r.driveWebViewLink} target="_blank" rel="noreferrer" style={{ display: 'block', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.driveFileName}>{r.driveFileName}</a>
-                          : <span key={r.id} style={{ display: 'block' }}>{r.driveFileName}</span>
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => setPickerTxId(tx.id)}
-                    style={smallButtonStyle}
-                    title="Manage receipts"
-                  >
-                    {txReceipts.length === 0 ? '+ Add' : '✎ Edit'}
-                  </button>
-                </td>
-                <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                  {isSuggested && (
-                    <button onClick={() => void approve(tx)} style={{ ...smallButtonStyle, marginRight: 4, background: '#E7F1EA', borderColor: '#2E7D61', color: '#1F5C4A' }}>✓ Approve</button>
-                  )}
-                  {aiEnabled && (
+              <React.Fragment key={tx.id}>
+                <tr style={rowStyle}>
+                  <td style={{ ...tdStyle, width: 32 }}>
+                    <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} />
+                  </td>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: colors.mutedGray }}>{tx.date}</td>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: colors.mutedGray, fontSize: 12 }}>{accName(tx.accountId)}</td>
+                  <td style={{ ...tdStyle, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis' }} title={tx.description}>
+                    {tx.description}
+                  </td>
+                  <td style={{ ...tdStyle, color: tx.amount < 0 ? colors.goldAntique : colors.forestGreen, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                    {tx.amount < 0 ? '−' : '+'}${Math.abs(tx.amount).toFixed(2)}
+                  </td>
+                  <td style={tdStyle}>
+                    <CategoryCombobox
+                      categories={categories}
+                      value={tx.categoryId}
+                      onChange={(id) => { if (id != null) void updateCategory(tx, id); }}
+                      onCreateNew={() => setCreateCatForTx(tx)}
+                      invalid={isUncategorized}
+                      width={190}
+                    />
+                  </td>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                    {isSuggested && (
+                      <button onClick={() => void approve(tx)} style={{ ...smallButtonStyle, marginRight: 4, background: colors.successBg, borderColor: colors.forestGreen, color: colors.successFg }}>✓ Approve</button>
+                    )}
+                    <button onClick={() => setEditTx(tx)} style={{ ...smallButtonStyle, marginRight: 4 }} title="Edit date, description, or amount">✎ Edit</button>
+                    <button onClick={() => void deleteOne(tx)} style={{ ...smallButtonStyle, marginRight: 4, color: colors.dangerFg, borderColor: colors.dangerFg }} title="Delete">✕</button>
                     <button
-                      onClick={() => setAiAssistTx(tx)}
-                      style={{ ...smallButtonStyle, marginRight: 4 }}
-                      title="AI: suggest category, tax description, and rule"
+                      onClick={() => toggleExpand(tx.id)}
+                      style={{ ...smallButtonStyle, padding: '2px 6px', fontFamily: 'monospace' }}
+                      title={isExpanded ? 'Collapse' : 'Show details'}
                     >
-                      ✨ AI
+                      {isExpanded ? '▲' : '▼'}
                     </button>
-                  )}
-                  <button
-                    onClick={() => setEditTx(tx)}
-                    style={{ ...smallButtonStyle, marginRight: 4 }}
-                    title="Edit date, description, or amount (fix parser mistakes)"
-                  >
-                    ✎ Edit
-                  </button>
-                  <button
-                    onClick={() => setCreateRuleForTx(tx)}
-                    style={smallButtonStyle}
-                    title="Create a rule from this transaction"
-                  >
-                    + Rule
-                  </button>
-                  <button
-                    onClick={() => void deleteOne(tx)}
-                    style={{ ...smallButtonStyle, marginLeft: 4, color: '#9A2D20', borderColor: '#9A2D20' }}
-                    title="Delete this transaction"
-                  >
-                    ✕ Delete
-                  </button>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+                {isExpanded && (
+                  <tr style={{ background: colors.creamDeep }}>
+                    <td colSpan={7} style={{ padding: 0, borderBottom: `2px solid ${colors.surfaceLine}` }}>
+                      <div style={{ display: 'flex', gap: 20, padding: '10px 12px 12px 44px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 200px', minWidth: 200 }}>
+                          <span style={{ fontWeight: 600, color: colors.mutedGray, textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 11 }}>Tax Description</span>
+                          <input
+                            type="text"
+                            defaultValue={tx.taxDescription ?? ''}
+                            placeholder="Business purpose"
+                            onBlur={(e) => void saveTaxDescription(tx, e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                            style={{ ...inputStyle, fontSize: 12 }}
+                            title="Justification for this expense in case of an audit"
+                          />
+                        </label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontWeight: 600, color: colors.mutedGray, textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 11 }}>Source</span>
+                          {isSuggested
+                            ? <span title={`Suggested: ${catName(tx.suggestedCategoryId)}`} style={{ background: colors.warningBg, color: colors.warningFg, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500 }}>⚡ suggested</span>
+                            : sourceBadge(tx.categorySource) ?? <span style={{ color: colors.hintText, fontSize: 11 }}>—</span>}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontWeight: 600, color: colors.mutedGray, textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 11 }}>Receipts</span>
+                          {txReceipts.length > 0 && (
+                            <div style={{ marginBottom: 4 }}>
+                              {txReceipts.map((r) => {
+                                const v = receiptView(r);
+                                return v.href
+                                  ? <a key={r.id} href={v.href} target="_blank" rel="noreferrer" style={{ display: 'block', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.name}>{v.name}</a>
+                                  : <span key={r.id} style={{ display: 'block' }}>{v.name}</span>;
+                              })}
+                            </div>
+                          )}
+                          <button onClick={() => setPickerTxId(tx.id)} style={smallButtonStyle}>
+                            {txReceipts.length === 0 ? '+ Receipt' : '✎ Receipts'}
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignSelf: 'flex-end' }}>
+                          {aiEnabled && (
+                            <button onClick={() => setAiAssistTx(tx)} style={smallButtonStyle} title="AI: suggest category, tax description, and rule">✨ AI</button>
+                          )}
+                          <button onClick={() => setCreateRuleForTx(tx)} style={smallButtonStyle} title="Create a rule from this transaction">+ Rule</button>
+                          <button onClick={() => setSplitTx(tx)} style={smallButtonStyle} title="Split this transaction across multiple categories">⑂ Split</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             );
           })}
-          {filtered.length === 0 && <tr><td colSpan={10} style={{ ...tdStyle, color: '#888', textAlign: 'center', padding: 24 }}>No transactions found.</td></tr>}
+          {filtered.length === 0 && <tr><td colSpan={7} style={{ ...tdStyle, color: colors.mutedGray, textAlign: 'center', padding: 24 }}>No transactions found.</td></tr>}
         </tbody>
       </table>
       </div>
 
-      {/* Mobile card list — shown only on narrow viewports via CSS */}
+      {/* Mobile card list, shown only on narrow viewports via CSS */}
       <div className="mobile-only" style={{ display: 'none' }}>
         {pageRows.length === 0 ? (
-          <div style={{ color: '#5E5E5E', textAlign: 'center', padding: 24, border: '1px solid #E6DFCB', borderRadius: 10, background: '#FFFDF8' }}>
+          <div style={{ color: colors.mutedGray, textAlign: 'center', padding: 24, border: `1px solid ${colors.softLine}`, borderRadius: 10, background: colors.warmWhite }}>
             No transactions found.
           </div>
         ) : pageRows.map((tx) => {
@@ -423,37 +483,37 @@ export function TransactionsPage() {
           const isTransfer = isTransferCategory(tx.categoryId);
           const isSuggested = tx.categorySource === 'suggested';
           const cardStyle: React.CSSProperties = {
-            background: isUncategorized ? '#fff3ee' : isTransfer ? '#f4f4f4' : isSuggested ? '#fffbe6' : '#fff',
-            border: '1px solid #e1e4e8',
-            borderLeft: isUncategorized ? '4px solid #d9534f' : '1px solid #e1e4e8',
+            background: isUncategorized ? colors.dangerBg : isTransfer ? colors.creamDeep : isSuggested ? colors.warningBg : colors.warmWhite,
+            border: `1px solid ${colors.softLine}`,
+            borderLeft: isUncategorized ? `4px solid ${colors.dangerFg}` : `1px solid ${colors.softLine}`,
             borderRadius: 6,
             padding: 12,
             marginBottom: 10,
             boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-            color: isTransfer ? '#777' : undefined,
+            color: isTransfer ? colors.mutedGray : undefined,
           };
           return (
             <div key={tx.id} style={cardStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' }}>{tx.date}</span>
+                <span style={{ fontSize: 12, color: colors.mutedGray, whiteSpace: 'nowrap' }}>{tx.date}</span>
                 <span style={{
-                  color: tx.amount < 0 ? '#c0392b' : '#2a8a3e',
+                  color: tx.amount < 0 ? colors.goldAntique : colors.forestGreen,
                   fontWeight: 600, fontSize: 16, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
                 }}>
                   {tx.amount < 0 ? '−' : '+'}${Math.abs(tx.amount).toFixed(2)}
                 </span>
               </div>
               <div style={{ fontWeight: 500, marginTop: 4, wordBreak: 'break-word' }}>{tx.description}</div>
-              <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: colors.mutedGray, marginTop: 2 }}>
                 {accName(tx.accountId)}
                 {' · '}
                 {isSuggested
-                  ? <span title={`Suggested: ${catName(tx.suggestedCategoryId)}`} style={{ background: '#FBEFD0', color: '#8A5A20', padding: '1px 6px', borderRadius: 999, fontSize: 11 }}>⚡ suggested</span>
-                  : sourceBadge(tx.categorySource) ?? <span style={{ color: '#bbb' }}>manual entry</span>}
+                  ? <span title={`Suggested: ${catName(tx.suggestedCategoryId)}`} style={{ background: colors.warningBg, color: colors.warningFg, padding: '1px 6px', borderRadius: 999, fontSize: 11 }}>⚡ suggested</span>
+                  : sourceBadge(tx.categorySource) ?? <span style={{ color: colors.hintText }}>manual entry</span>}
               </div>
 
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <label style={{ fontSize: 11, color: '#555', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <label style={{ fontSize: 11, color: colors.mutedGray, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                   Category
                   <div style={{ marginTop: 4 }}>
                     <CategoryCombobox
@@ -466,7 +526,7 @@ export function TransactionsPage() {
                     />
                   </div>
                 </label>
-                <label style={{ fontSize: 11, color: '#555', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <label style={{ fontSize: 11, color: colors.mutedGray, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                   Tax Description
                   <input
                     type="text"
@@ -481,18 +541,19 @@ export function TransactionsPage() {
 
               {txReceipts.length > 0 && (
                 <div style={{ fontSize: 12, marginTop: 8 }}>
-                  <div style={{ color: '#555', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Receipts</div>
-                  {txReceipts.map((r) =>
-                    r.driveWebViewLink
-                      ? <a key={r.id} href={r.driveWebViewLink} target="_blank" rel="noreferrer" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.driveFileName}>{r.driveFileName}</a>
-                      : <span key={r.id} style={{ display: 'block' }}>{r.driveFileName}</span>
-                  )}
+                  <div style={{ color: colors.mutedGray, fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Receipts</div>
+                  {txReceipts.map((r) => {
+                    const v = receiptView(r);
+                    return v.href
+                      ? <a key={r.id} href={v.href} target="_blank" rel="noreferrer" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.name}>{v.name}</a>
+                      : <span key={r.id} style={{ display: 'block' }}>{v.name}</span>;
+                  })}
                 </div>
               )}
 
               <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
                 {isSuggested && (
-                  <button onClick={() => void approve(tx)} style={{ ...smallButtonStyle, background: '#E7F1EA', borderColor: '#2E7D61', color: '#1F5C4A' }}>✓ Approve</button>
+                  <button onClick={() => void approve(tx)} style={{ ...smallButtonStyle, background: colors.successBg, borderColor: colors.forestGreen, color: colors.successFg }}>✓ Approve</button>
                 )}
                 <button onClick={() => setPickerTxId(tx.id)} style={smallButtonStyle}>
                   {txReceipts.length === 0 ? '+ Receipt' : '✎ Receipts'}
@@ -502,7 +563,7 @@ export function TransactionsPage() {
                 )}
                 <button onClick={() => setEditTx(tx)} style={smallButtonStyle}>✎ Edit</button>
                 <button onClick={() => setCreateRuleForTx(tx)} style={smallButtonStyle}>+ Rule</button>
-                <button onClick={() => void deleteOne(tx)} style={{ ...smallButtonStyle, color: '#9A2D20', borderColor: '#9A2D20' }}>✕ Delete</button>
+                <button onClick={() => void deleteOne(tx)} style={{ ...smallButtonStyle, color: colors.dangerFg, borderColor: colors.dangerFg }}>✕ Delete</button>
               </div>
             </div>
           );
@@ -513,7 +574,7 @@ export function TransactionsPage() {
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4, marginTop: 12 }}>
           <button onClick={() => setPage(1)} disabled={currentPage === 1} style={pageButtonStyle}>«</button>
           <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1} style={pageButtonStyle}>‹</button>
-          <span style={{ padding: '0 12px', fontSize: 13, color: '#555' }}>Page {currentPage} of {totalPages}</span>
+          <span style={{ padding: '0 12px', fontSize: 13, color: colors.mutedGray }}>Page {currentPage} of {totalPages}</span>
           <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} style={pageButtonStyle}>›</button>
           <button onClick={() => setPage(totalPages)} disabled={currentPage === totalPages} style={pageButtonStyle}>»</button>
         </div>
@@ -573,6 +634,27 @@ export function TransactionsPage() {
           onSaved={() => void load()}
         />
       )}
+
+      {splitTx && (
+        <SplitModal
+          tx={splitTx}
+          categories={categories}
+          onClose={() => setSplitTx(null)}
+          onSaved={() => void load()}
+          onCreateCategory={() => setCreateCatForTx(splitTx)}
+        />
+      )}
+      {confirmDelete !== null && (
+        <ConfirmModal
+          message={
+            confirmDelete === 'bulk'
+              ? `Delete ${selectedIds.size} selected transaction${selectedIds.size === 1 ? '' : 's'}? This cannot be undone.`
+              : `Delete "${(confirmDelete as Transaction).description}" (${(confirmDelete as Transaction).date}, $${Math.abs((confirmDelete as Transaction).amount).toFixed(2)})?`
+          }
+          onConfirm={() => void doDelete()}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }
@@ -629,7 +711,7 @@ function CreateCategoryDialog({
         <label>Tax export code (optional)<br />
           <input value={taxExportCode} onChange={(e) => setTaxExportCode(e.target.value)} style={{ width: '100%' }} />
         </label>
-        {error && <div style={{ color: '#c00' }}>{error}</div>}
+        {error && <div style={{ color: colors.dangerFg }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} disabled={busy}>Cancel</button>
           <button onClick={() => void submit()} disabled={busy}>Create</button>
@@ -690,7 +772,7 @@ function CreateRuleDialog({
   return (
     <Modal title="Create rule" onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ fontSize: 12, color: '#555' }}>
+        <div style={{ fontSize: 12, color: colors.mutedGray }}>
           From transaction: <strong>{tx.description}</strong>
         </div>
         <label>Rule name<br />
@@ -730,7 +812,7 @@ function CreateRuleDialog({
           <input type="checkbox" checked={applyNow} onChange={(e) => setApplyNow(e.target.checked)} />
           Apply to existing matching transactions now
         </label>
-        {error && <div style={{ color: '#c00' }}>{error}</div>}
+        {error && <div style={{ color: colors.dangerFg }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} disabled={busy}>Cancel</button>
           <button onClick={() => void submit()} disabled={busy}>Create rule</button>
@@ -752,7 +834,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: '#FFFDF8', borderRadius: 14, padding: 20, width: 420, maxWidth: '90vw', boxShadow: '0 12px 40px rgba(31,41,32,0.22)', border: '1px solid #E6DFCB' }}
+        style={{ background: colors.warmWhite, borderRadius: 14, padding: 20, width: 420, maxWidth: '90vw', boxShadow: '0 12px 40px rgba(31,41,32,0.22)', border: `1px solid ${colors.softLine}` }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
@@ -765,10 +847,10 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 
 const tableWrapStyle: React.CSSProperties = {
-  border: '1px solid #E6DFCB',
+  border: `1px solid ${colors.softLine}`,
   borderRadius: 10,
   overflow: 'auto',
-  background: '#FFFDF8',
+  background: colors.warmWhite,
   boxShadow: '0 1px 2px rgba(31, 41, 32, 0.05), 0 1px 3px rgba(31, 41, 32, 0.04)',
 };
 const tableStyle: React.CSSProperties = {
@@ -779,13 +861,13 @@ const tableStyle: React.CSSProperties = {
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '8px 10px',
-  background: '#F7F3E8',
-  borderBottom: '1px solid #E6DFCB',
+  background: colors.cream,
+  borderBottom: `1px solid ${colors.softLine}`,
   fontSize: 11,
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: 0.4,
-  color: '#5E5E5E',
+  color: colors.mutedGray,
   position: 'sticky',
   top: 0,
   zIndex: 1,
@@ -801,8 +883,8 @@ const filterBarStyle: React.CSSProperties = {
   marginBottom: 14,
   alignItems: 'flex-end',
   padding: 12,
-  background: '#F7F3E8',
-  border: '1px solid #E6DFCB',
+  background: colors.cream,
+  border: `1px solid ${colors.softLine}`,
   borderRadius: 10,
 };
 const fieldStyle: React.CSSProperties = {
@@ -810,48 +892,48 @@ const fieldStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 4,
   fontSize: 11,
-  color: '#5E5E5E',
+  color: colors.mutedGray,
   textTransform: 'uppercase',
   letterSpacing: 0.4,
   fontWeight: 600,
 };
 const inputStyle: React.CSSProperties = {
   padding: '4px 8px',
-  border: '1px solid #E1DACB',
+  border: `1px solid ${colors.surfaceLine}`,
   borderRadius: 6,
   fontSize: 13,
-  background: '#FFFDF8',
+  background: colors.warmWhite,
   fontFamily: 'inherit',
-  color: '#2B2B2B',
+  color: colors.darkSlate,
   textTransform: 'none',
   letterSpacing: 0,
   fontWeight: 400,
 };
 const buttonStyle: React.CSSProperties = {
   padding: '6px 14px',
-  background: '#FFFDF8',
-  border: '1px solid #E1DACB',
+  background: colors.warmWhite,
+  border: `1px solid ${colors.surfaceLine}`,
   borderRadius: 6,
   cursor: 'pointer',
   fontSize: 13,
-  color: '#2B2B2B',
+  color: colors.darkSlate,
 };
 const smallButtonStyle: React.CSSProperties = {
   fontSize: 11,
   padding: '3px 8px',
-  background: '#FFFDF8',
-  border: '1px solid #E1DACB',
+  background: colors.warmWhite,
+  border: `1px solid ${colors.surfaceLine}`,
   borderRadius: 6,
   cursor: 'pointer',
-  color: '#2B2B2B',
+  color: colors.darkSlate,
 };
 const pageButtonStyle: React.CSSProperties = {
   padding: '4px 10px',
-  background: '#FFFDF8',
-  border: '1px solid #E1DACB',
+  background: colors.warmWhite,
+  border: `1px solid ${colors.surfaceLine}`,
   borderRadius: 6,
   cursor: 'pointer',
   fontSize: 13,
   minWidth: 32,
-  color: '#2B2B2B',
+  color: colors.darkSlate,
 };

@@ -1,17 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Account, CreateAccountPayload, UpdateAccountPayload, BankType, AccountKind } from '@keepmyledger/shared';
 import { api } from '../api/client';
+import { ConfirmModal } from '../components/ConfirmModal';
 import {
   filterBarStyle, fieldStyle, inputStyle, labelStyle,
   tableWrapStyle, tableStyle, thStyle, tdStyle,
   buttonStyle, primaryButtonStyle, smallButtonStyle,
   modalBackdropStyle, modalStyle, rowStripe, pillStyle,
 } from '../styles/table';
+import { colors } from '../styles/tokens';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const BANK_LABEL: Record<BankType, string> = {
   mt: 'M&T Bank',
   amex: 'American Express',
   chase: 'Chase',
+  ofx: 'OFX / QFX',
   unknown: 'Other',
 };
 const KIND_LABEL: Record<AccountKind, string> = {
@@ -20,22 +24,26 @@ const KIND_LABEL: Record<AccountKind, string> = {
   credit_card: 'Credit Card',
 };
 const KIND_PILL: Record<AccountKind, React.CSSProperties> = {
-  checking:    pillStyle('#e1ecf4', '#205c8a'),
-  savings:     pillStyle('#e7f5e0', '#3a7a1e'),
-  credit_card: pillStyle('#f4e5d4', '#8a5a20'),
+  checking:    pillStyle(colors.creamDeep, colors.mutedGray),
+  savings:     pillStyle(colors.successBg, colors.successFg),
+  credit_card: pillStyle(colors.warningBg, colors.warningFg),
 };
 
 export function AccountsPage() {
+  useDocumentTitle('Accounts');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [editing, setEditing] = useState<Account | 'new' | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
 
   const load = () => api.accounts.list().then(setAccounts).catch(console.error);
   useEffect(() => { void load(); }, []);
 
-  const del = async (id: number) => {
-    if (!confirm('Delete this account and all its transactions?')) return;
-    await api.accounts.delete(id);
+  const del = (id: number) => setConfirmDeleteId(id);
+  const doDelete = async () => {
+    if (confirmDeleteId === null) return;
+    await api.accounts.delete(confirmDeleteId);
+    setConfirmDeleteId(null);
     void load();
   };
 
@@ -66,7 +74,7 @@ export function AccountsPage() {
             style={inputStyle}
           />
         </label>
-        <span style={{ alignSelf: 'flex-end', color: '#666', fontSize: 13, paddingBottom: 8 }}>
+        <span style={{ alignSelf: 'flex-end', color: colors.mutedGray, fontSize: 13, paddingBottom: 8 }}>
           {filtered.length} of {accounts.length} account{accounts.length === 1 ? '' : 's'}
         </span>
       </div>
@@ -90,19 +98,19 @@ export function AccountsPage() {
                 <td style={tdStyle}>
                   <span style={KIND_PILL[a.accountKind]}>{KIND_LABEL[a.accountKind] ?? a.accountKind}</span>
                 </td>
-                <td style={{ ...tdStyle, color: a.lastStatementPeriod ? '#333' : '#bbb', fontVariantNumeric: 'tabular-nums' }}>
+                <td style={{ ...tdStyle, color: a.lastStatementPeriod ? colors.darkSlate : colors.hintText, fontVariantNumeric: 'tabular-nums' }}>
                   {a.lastStatementPeriod ?? '—'}
                 </td>
                 <td style={tdStyle}>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button style={smallButtonStyle} onClick={() => setEditing(a)}>Edit</button>
-                    <button style={{ ...smallButtonStyle, color: '#a52a2a' }} onClick={() => void del(a.id)}>Delete</button>
+                    <button style={{ ...smallButtonStyle, color: colors.dangerFg }} onClick={() => void del(a.id)}>Delete</button>
                   </div>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5} style={{ ...tdStyle, color: '#888', textAlign: 'center', padding: 24 }}>
+              <tr><td colSpan={5} style={{ ...tdStyle, color: colors.mutedGray, textAlign: 'center', padding: 24 }}>
                 {accounts.length === 0 ? 'No accounts yet.' : 'No accounts match your search.'}
               </td></tr>
             )}
@@ -115,6 +123,13 @@ export function AccountsPage() {
           account={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); void load(); }}
+        />
+      )}
+      {confirmDeleteId !== null && (
+        <ConfirmModal
+          message="Delete this account and all its transactions? This cannot be undone."
+          onConfirm={() => void doDelete()}
+          onCancel={() => setConfirmDeleteId(null)}
         />
       )}
     </div>
@@ -159,7 +174,7 @@ function AccountEditorModal({
       <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
         <h3 style={{ marginTop: 0 }}>{isEdit ? 'Edit Account' : 'New Account'}</h3>
         <form onSubmit={(e) => void submit(e)} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {error && <div style={{ color: '#9A2D20', background: '#FBE8E2', padding: 10, borderRadius: 6 }}>{error}</div>}
+          {error && <div style={{ color: colors.dangerFg, background: colors.dangerBg, padding: 10, borderRadius: 6 }}>{error}</div>}
           <label style={labelStyle}>Name
             <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           </label>
@@ -168,6 +183,7 @@ function AccountEditorModal({
               <option value="mt">M&amp;T Bank</option>
               <option value="amex">American Express</option>
               <option value="chase">Chase</option>
+              <option value="ofx">OFX / QFX</option>
               <option value="unknown">Other</option>
             </select>
           </label>

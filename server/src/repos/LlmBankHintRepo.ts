@@ -2,7 +2,7 @@
  * Tracks LLM-fallback usage per bank and stores generated column-structure
  * hints once a bank's hit count crosses the analysis threshold.
  *
- * This is a global (non-user-scoped) repo — one row per unique bank name
+ * This is a global (non-user-scoped) repo; one row per unique bank name
  * across all users.
  */
 export interface LlmBankHintRow {

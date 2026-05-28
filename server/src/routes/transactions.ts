@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { TransactionFilter } from '../repos/TransactionRepo';
-import { getAiDailyLimit } from '../auth/context';
+import { requireActiveSubscription } from '../middleware/requireActiveSubscription';
+import { getAiQuota } from '../services/tierService';
 
 export function transactionsRouter(): Router {
   const router = Router();
@@ -64,23 +65,40 @@ export function transactionsRouter(): Router {
   });
 
   /** Ask the LLM to suggest a category + tax description + optional rule. */
-  router.post('/:id/ai-suggest', async (req: Request, res: Response) => {
+  router.post('/:id/ai-suggest', requireActiveSubscription(), async (req: Request, res: Response) => {
     const ai = req.ctx!.services.aiAssist;
     if (!ai.isAvailable()) {
       return res.status(503).json({ error: 'AI assist is not configured. Set LLM_API_KEY on the server.' });
     }
 
-    // Per-user daily quota. limit=0 means unlimited.
-    const limit = getAiDailyLimit();
+    // Resolve quota by subscription tier:
+    //   free   → lifetime cap (5 calls total)
+    //   paid   → daily cap from AI_DAILY_LIMIT (0 = unlimited)
+    //   self-host → unlimited
+    const sub = await req.ctx!.repos.subscription.get();
+    const quota = getAiQuota(sub);
     const usageRepo = req.ctx!.repos.aiUsage;
-    if (limit > 0) {
+
+    if (quota.kind === 'lifetime') {
+      const used = await usageRepo.getLifetimeCount();
+      if (used >= quota.limit) {
+        return res.status(429).json({
+          error: `Free trial AI Assist limit reached (${used}/${quota.limit}). Upgrade for unlimited AI Assist.`,
+          limit: quota.limit,
+          used,
+          period: 'lifetime',
+          upgradeRequired: true,
+        });
+      }
+    } else if (quota.kind === 'daily') {
       const used = await usageRepo.getTodayCount();
-      if (used >= limit) {
+      if (used >= quota.limit) {
         res.setHeader('Retry-After', secondsUntilUtcMidnight());
         return res.status(429).json({
-          error: `Daily AI Assist limit reached (${used}/${limit}). Resets at 00:00 UTC.`,
-          limit,
+          error: `Daily AI Assist limit reached (${used}/${quota.limit}). Resets at 00:00 UTC.`,
+          limit: quota.limit,
           used,
+          period: 'daily',
           resetAt: nextUtcMidnight().toISOString(),
         });
       }
@@ -88,8 +106,9 @@ export function transactionsRouter(): Router {
 
     try {
       const suggestion = await ai.suggest(Number(req.params.id));
-      // Only count successful calls toward the quota.
-      if (limit > 0) {
+      // Only count successful calls toward the quota. Increment unconditionally
+      // for free + daily quotas (lifetime sums all daily rows anyway).
+      if (quota.kind !== 'unlimited') {
         await usageRepo.incrementToday();
       }
       res.json(suggestion);
@@ -118,6 +137,59 @@ export function transactionsRouter(): Router {
     }
     const deleted = await req.ctx!.repos.transactions.bulkDelete(numeric);
     res.json({ deleted });
+  });
+
+  /** GET /api/transactions/:id/splits: return all splits for a transaction */
+  router.get('/:id/splits', async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const tx = await req.ctx!.repos.transactions.findById(id);
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+    const splits = await req.ctx!.repos.transactions.getSplits(id);
+    res.json({ splits });
+  });
+
+  /**
+   * PUT /api/transactions/:id/splits: atomically replace all splits.
+   * Body: { splits: Array<{ categoryId: number; amount: number; note?: string }> }
+   * Pass an empty array to clear splits.
+   * Validates that split amounts sum to the parent transaction amount (±$0.01 tolerance).
+   */
+  router.put('/:id/splits', async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const tx = await req.ctx!.repos.transactions.findById(id);
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+
+    const { splits } = (req.body ?? {}) as { splits?: unknown };
+    if (!Array.isArray(splits)) {
+      return res.status(400).json({ error: 'splits must be an array' });
+    }
+
+    type SplitInput = { categoryId: number; amount: number; note?: string | null };
+    const parsed: SplitInput[] = [];
+    for (let i = 0; i < splits.length; i++) {
+      const s = splits[i] as Record<string, unknown>;
+      const catId = Number(s.categoryId);
+      const amt = Number(s.amount);
+      if (!Number.isFinite(catId) || catId <= 0) {
+        return res.status(400).json({ error: `splits[${i}].categoryId must be a positive integer` });
+      }
+      if (!Number.isFinite(amt) || amt === 0) {
+        return res.status(400).json({ error: `splits[${i}].amount must be a nonzero number` });
+      }
+      parsed.push({ categoryId: catId, amount: Math.round(amt * 100) / 100, note: (s.note as string | null) ?? null });
+    }
+
+    if (parsed.length > 0) {
+      const splitTotal = parsed.reduce((acc, s) => acc + s.amount, 0);
+      if (Math.abs(splitTotal - tx.amount) > 0.01) {
+        return res.status(400).json({
+          error: `Split amounts (${splitTotal.toFixed(2)}) must sum to the transaction amount (${tx.amount.toFixed(2)})`,
+        });
+      }
+    }
+
+    const saved = await req.ctx!.repos.transactions.replaceSplits(id, parsed);
+    res.json({ splits: saved });
   });
 
   return router;

@@ -110,6 +110,32 @@ describe('parseCsv', () => {
       { date: '2026-01-04', description: 'GOOD', amount: -1 },
     ]);
   });
+
+  it('warns when more than 10% of rows are skipped', () => {
+    // 1 good, 2 bad → 66% skipped, should warn
+    const csv = [
+      'Date,Description,Amount',
+      '2026-01-01,GOOD,1.00',
+      'bad-date,X,1.00',
+      '2026-01-02,Y,not-a-number',
+    ].join('\n');
+    const r = parseCsv(csv);
+    expect(r.transactions).toHaveLength(1);
+    expect(r.warnings).toBeDefined();
+    expect(r.warnings![0]).toMatch(/Skipped 2 of 3 rows/);
+    expect(r.warnings![0]).toMatch(/unparseable dates/);
+    expect(r.warnings![0]).toMatch(/unparseable amounts/);
+  });
+
+  it('does not emit warnings when the skip rate is at or below 10%', () => {
+    // 10 good, 1 bad → 9% skipped
+    const lines = ['Date,Description,Amount'];
+    for (let i = 1; i <= 10; i++) lines.push(`2026-01-${String(i).padStart(2, '0')},OK${i},1.00`);
+    lines.push('bad,X,1.00');
+    const r = parseCsv(lines.join('\n'));
+    expect(r.transactions).toHaveLength(10);
+    expect(r.warnings).toBeUndefined();
+  });
 });
 
 describe('parseDate', () => {
@@ -148,7 +174,7 @@ describe('parseCsv (headerless)', () => {
   });
 
   it('headerless with split debit/credit columns', () => {
-    // date, desc, debit, credit — both amount columns positive
+    // date, desc, debit, credit; both amount columns positive
     const csv = [
       '01/04/2026,GROCERY,52.10,',
       '01/05/2026,REFUND,,12.00',

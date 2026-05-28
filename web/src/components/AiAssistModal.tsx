@@ -46,6 +46,13 @@ export function AiAssistModal({ tx, categories, onClose, onApplied }: Props) {
   const [applyTax, setApplyTax] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError(null);
@@ -98,10 +105,16 @@ export function AiAssistModal({ tx, categories, onClose, onApplied }: Props) {
   };
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
+    <div
+      style={overlayStyle}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ai-assist-modal-title"
+      onClick={onClose}
+    >
       <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ margin: 0, fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
-          ✨ AI Suggestion
+        <h2 id="ai-assist-modal-title" style={{ margin: 0, fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span aria-hidden="true">✨</span> AI Suggestion
         </h2>
         <p style={{ color: '#666', fontSize: 13, marginTop: 4, marginBottom: 16 }}>
           {tx.date} · <strong>{tx.description}</strong> · {tx.amount < 0 ? '−' : '+'}${Math.abs(tx.amount).toFixed(2)}
@@ -162,7 +175,7 @@ export function AiAssistModal({ tx, categories, onClose, onApplied }: Props) {
                 </label>
                 <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
                   <div><strong>Name:</strong> {s.proposedRule.name}</div>
-                  <div><strong>Match:</strong> {s.proposedRule.patternKind} — <code>{s.proposedRule.descriptionPattern}</code></div>
+                  <div><strong>Match:</strong> {s.proposedRule.patternKind}: <code>{s.proposedRule.descriptionPattern}</code></div>
                   <div><strong>→ Category:</strong> {categories.find((c) => c.id === s.proposedRule!.categoryId)?.name ?? '—'}</div>
                 </div>
               </div>

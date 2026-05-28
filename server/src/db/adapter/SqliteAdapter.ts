@@ -3,7 +3,7 @@ import { DbAdapter } from '../adapter';
 
 /**
  * Wraps `node:sqlite`'s synchronous `DatabaseSync` in the async DbAdapter
- * interface. Calls remain synchronous under the hood — we just return
+ * interface. Calls remain synchronous under the hood; we just return
  * already-resolved promises so the rest of the code can be uniformly async.
  */
 export class SqliteAdapter implements DbAdapter {

@@ -1,14 +1,16 @@
 import type {
-  Account, Category, Rule, Transaction, Statement, Receipt, DriveAuthStatus,
+  Account, Category, Rule, Transaction, TransactionSplit, Statement, Receipt, DriveAuthStatus,
   CreateAccountPayload, UpdateAccountPayload,
   CreateCategoryPayload, UpdateCategoryPayload,
   CreateRulePayload, UpdateRulePayload,
   UpdateTransactionPayload,
   ImportResult, StartupCheckResult,
   ReportByCategoryRow, CashflowRow,
-  AppConfig, User,
+  AppConfig, User, ReceiptStoragePreference,
   AiSuggestion,
   PreviewResponse, CommitPayload, CsvColumnMapping,
+  Org, OrgMember, Business, BusinessSummary, OrgInvite,
+  UnknownFormatSample, UnknownFormatStatus,
 } from '@keepmyledger/shared';
 
 const BASE = '/api';
@@ -21,10 +23,39 @@ export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
 let onSubscriptionRequired: (() => void) | undefined;
 export function setSubscriptionRequiredHandler(fn: () => void) { onSubscriptionRequired = fn; }
 
+/**
+ * The active business id injected as x-business-id on every request.
+ * Persisted to localStorage so the user's selection survives page reloads —
+ * BusinessSwitcher triggers a full reload after switching, which would
+ * otherwise wipe this module-level state and revert to the first business.
+ */
+const ACTIVE_BUSINESS_STORAGE_KEY = 'kml.activeBusinessId';
+
+function readStoredBusinessId(): number | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_BUSINESS_STORAGE_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+
+let activeBusinessId: number | null = readStoredBusinessId();
+export function getActiveBusinessId(): number | null { return activeBusinessId; }
+export function setActiveBusinessId(id: number | null) {
+  activeBusinessId = id;
+  try {
+    if (id === null) localStorage.removeItem(ACTIVE_BUSINESS_STORAGE_KEY);
+    else localStorage.setItem(ACTIVE_BUSINESS_STORAGE_KEY, String(id));
+  } catch { /* localStorage unavailable — header still works for this session */ }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const extraHeaders: Record<string, string> = {};
+  if (activeBusinessId !== null) extraHeaders['x-business-id'] = String(activeBusinessId);
   const res = await fetch(`${BASE}${url}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders, ...init?.headers },
     ...init,
   });
   if (res.status === 401) onUnauthorized?.();
@@ -89,6 +120,9 @@ export const api = {
     listReceipts: (id: number) => request<Receipt[]>(`/receipts/transactions/${id}`),
     linkReceipt: (id: number, receiptId: number) => request<Receipt[]>(`/receipts/transactions/${id}`, { method: 'POST', body: JSON.stringify({ receiptId }) }),
     unlinkReceipt: (id: number, receiptId: number) => request<void>(`/receipts/transactions/${id}/${receiptId}`, { method: 'DELETE' }),
+    getSplits: (id: number) => request<{ splits: TransactionSplit[] }>(`/transactions/${id}/splits`),
+    replaceSplits: (id: number, splits: Array<{ categoryId: number; amount: number; note?: string | null }>) =>
+      request<{ splits: TransactionSplit[] }>(`/transactions/${id}/splits`, { method: 'PUT', body: JSON.stringify({ splits }) }),
   },
 
   imports: {
@@ -117,8 +151,29 @@ export const api = {
       }),
     commit: (payload: CommitPayload) =>
       request<ImportResult>('/imports/commit', { method: 'POST', body: JSON.stringify(payload) }),
+    enhanceLlm: (token: string, accountId?: number) =>
+      request<PreviewResponse>(`/imports/preview/${encodeURIComponent(token)}/enhance-llm`, {
+        method: 'POST',
+        body: JSON.stringify({ accountId }),
+      }),
     abandon: (token: string) =>
       request<void>(`/imports/preview/${encodeURIComponent(token)}`, { method: 'DELETE' }),
+    reportUnknown: (token: string, bankHint?: string, accountId?: number) =>
+      request<{ id: number }>('/imports/report-unknown', {
+        method: 'POST',
+        body: JSON.stringify({ token, bankHint, accountId }),
+      }),
+    resolveDuplicates: (statementId: number, decisions: Array<{
+      externalHash: string;
+      action: 'keep' | 'skip';
+      date: string;
+      description: string;
+      amount: number;
+    }>) =>
+      request<{ inserted: number; transactions: Transaction[] }>('/imports/duplicates/resolve', {
+        method: 'POST',
+        body: JSON.stringify({ statementId, decisions }),
+      }),
   },
 
   reports: {
@@ -158,15 +213,125 @@ export const api = {
 
   config: () => request<AppConfig>('/config'),
 
+  account: {
+    exportUrl: () => `${BASE}/account/export`,
+    delete: () => request<{ ok: boolean }>('/account', { method: 'DELETE' }),
+    setReceiptStorage: (preference: ReceiptStoragePreference | null) =>
+      request<{ ok: boolean; preference: ReceiptStoragePreference | null }>('/account/receipt-storage', {
+        method: 'PUT',
+        body: JSON.stringify({ preference }),
+      }),
+  },
+
+  admin: {
+    stats: {
+      overview: () => request<{
+        totalUsers: number;
+        newUsers7d: number;
+        newUsers30d: number;
+        totalTransactions: number;
+        totalStatements: number;
+        subscriptions: Record<string, number>;
+        aiCallsToday: number;
+        aiCalls30d: number;
+      }>('/admin/stats/overview'),
+      signups: (days = 30) => request<{ day: string; total: number }[]>(`/admin/stats/signups?days=${days}`),
+      imports: (days = 30) => request<{ day: string; total: number }[]>(`/admin/stats/imports?days=${days}`),
+    },
+    users: {
+      list: (params?: { q?: string; trialEndingDays?: number; page?: number; limit?: number }) => {
+        const qs = params
+          ? '?' + new URLSearchParams(
+              Object.entries(params)
+                .filter(([, v]) => v !== undefined)
+                .map(([k, v]) => [k, String(v)])
+            ).toString()
+          : '';
+        return request<{
+          total: number;
+          page: number;
+          limit: number;
+          users: Array<{
+            id: string;
+            email: string | null;
+            name: string | null;
+            createdAt: string;
+            subStatus: string | null;
+            trialEndsAt: string | null;
+            tier: string;
+            seats: number;
+            grantedByAdminId: string | null;
+          }>;
+        }>(`/admin/users${qs}`);
+      },
+      extendTrial: (userIds: string[], days: number, reason?: string) =>
+        request<{ ok: boolean; extended: number }>('/admin/users/extend-trial', {
+          method: 'POST',
+          body: JSON.stringify({ userIds, days, reason }),
+        }),
+      revealEmail: (userId: string) =>
+        request<{ email: string | null }>(`/admin/users/${encodeURIComponent(userId)}/reveal-email`),
+      grantTier: (userId: string, tier: 'business' | 'org', seats?: number) =>
+        request<{ ok: boolean; userId: string; tier: string; seats: number }>(
+          `/admin/users/${encodeURIComponent(userId)}/grant-tier`,
+          { method: 'POST', body: JSON.stringify({ tier, seats }) },
+        ),
+      revokeGrant: (userId: string) =>
+        request<{ ok: boolean; userId: string; status: string }>(
+          `/admin/users/${encodeURIComponent(userId)}/revoke-grant`,
+          { method: 'POST' },
+        ),
+    },
+
+    unknownFormats: {
+      list: (params?: { status?: UnknownFormatStatus; page?: number; limit?: number }) => {
+        const qs = params
+          ? '?' + new URLSearchParams(
+              Object.entries(params)
+                .filter(([, v]) => v !== undefined)
+                .map(([k, v]) => [k, String(v)])
+            ).toString()
+          : '';
+        return request<{ total: number; page: number; limit: number; samples: UnknownFormatSample[] }>(
+          `/admin/unknown-formats${qs}`
+        );
+      },
+      update: (id: number, patch: { status?: UnknownFormatStatus; adminNotes?: string | null }) =>
+        request<UnknownFormatSample>(`/admin/unknown-formats/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(patch),
+        }),
+    },
+  },
+
   billing: {
     status: () => request<{
       status: string | null;
       plan: string | null;
+      tier: string | null;
+      seats: number | null;
       trialEndsAt: string | null;
       currentPeriodEnd: string | null;
       daysRemaining: number | null;
       hasPaymentMethod: boolean;
+      last4: string | null;
+      aiLifetimeCount: number | null;
+      aiLifetimeLimit: number | null;
     }>('/billing/status'),
+    setupIntent: () => request<{ clientSecret: string }>('/billing/setup-intent', { method: 'POST' }),
+    subscribe: (params: {
+      paymentMethodId: string;
+      tier: 'business' | 'org';
+      interval: 'monthly' | 'annual';
+      seats?: number;
+      promoCode?: string;
+    }) =>
+      request<{ ok: boolean; status: string }>('/billing/subscribe', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+    cancel: () => request<{ ok: boolean }>('/billing/cancel', { method: 'POST' }),
+    reactivate: () => request<{ ok: boolean }>('/billing/reactivate', { method: 'POST' }),
   },
 
   auth: {
@@ -175,10 +340,10 @@ export const api = {
     loginUrl: (provider: string) => `${BASE}/auth/${provider}`,
 
     local: {
-      register: (username: string, password: string) =>
+      register: (username: string, password: string, email: string, businessName: string) =>
         request<{ user: User }>('/auth/local/register', {
           method: 'POST',
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username, password, email, businessName, acceptTos: true }),
         }),
       login: (username: string, password: string) =>
         request<{ user?: User; mfaRequired?: boolean }>('/auth/local/login', {
@@ -189,6 +354,21 @@ export const api = {
         request<{ user: User }>('/auth/local/verify-mfa', {
           method: 'POST',
           body: JSON.stringify({ code }),
+        }),
+      updateEmail: (email: string) =>
+        request<{ user: User }>('/auth/local/email', {
+          method: 'PATCH',
+          body: JSON.stringify({ email }),
+        }),
+      forgotPassword: (email: string) =>
+        request<{ ok: boolean }>('/auth/local/forgot-password', {
+          method: 'POST',
+          body: JSON.stringify({ email }),
+        }),
+      resetPassword: (token: string, password: string) =>
+        request<{ ok: boolean }>('/auth/local/reset-password', {
+          method: 'POST',
+          body: JSON.stringify({ token, password }),
         }),
     },
 
@@ -207,5 +387,55 @@ export const api = {
           body: JSON.stringify({ code }),
         }),
     },
+  },
+
+  orgs: {
+    list: () => request<Org[]>('/orgs'),
+    create: (name: string) => request<Org>('/orgs', { method: 'POST', body: JSON.stringify({ name }) }),
+    listMembers: (orgId: string) => request<OrgMember[]>(`/orgs/${orgId}/members`),
+    removeMember: (orgId: string, userId: string) =>
+      request<void>(`/orgs/${orgId}/members/${userId}`, { method: 'DELETE' }),
+  },
+
+  businesses: {
+    list: (orgId: string) => request<Business[]>(`/orgs/${orgId}/businesses`),
+    create: (orgId: string, name: string) =>
+      request<Business>(`/orgs/${orgId}/businesses`, { method: 'POST', body: JSON.stringify({ name }) }),
+    rename: (orgId: string, id: number, name: string) =>
+      request<Business>(`/orgs/${orgId}/businesses/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+    /** Per-table row counts shown in the confirm-delete modal. */
+    deletePreview: (orgId: string, id: number) =>
+      request<BusinessSummary>(`/orgs/${orgId}/businesses/${id}/delete-preview`),
+    /** Destructive. `confirm` must equal the business name exactly or the server returns 400. */
+    delete: (orgId: string, id: number, confirm: string) =>
+      request<void>(`/orgs/${orgId}/businesses/${id}?confirm=${encodeURIComponent(confirm)}`, { method: 'DELETE' }),
+    /** Upload (or replace) a logo. Accepts PNG/JPEG/WebP, max 1 MB. */
+    uploadLogo: async (orgId: string, id: number, file: File): Promise<Business> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE}/orgs/${orgId}/businesses/${id}/logo`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: activeBusinessId !== null ? { 'x-business-id': String(activeBusinessId) } : undefined,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+        throw new Error(body.error ?? res.statusText);
+      }
+      return res.json() as Promise<Business>;
+    },
+    deleteLogo: (orgId: string, id: number) =>
+      request<void>(`/orgs/${orgId}/businesses/${id}/logo`, { method: 'DELETE' }),
+    /** Resolves a fresh signed URL for the logo (server issues a 302 to the storage). */
+    logoUrl: (orgId: string, id: number) => `${BASE}/orgs/${orgId}/businesses/${id}/logo`,
+  },
+
+  invites: {
+    list: (orgId: string) => request<OrgInvite[]>(`/orgs/${orgId}/invites`),
+    create: (orgId: string, email: string, role?: 'owner' | 'member') =>
+      request<OrgInvite>(`/orgs/${orgId}/invites`, { method: 'POST', body: JSON.stringify({ email, role }) }),
+    expire: (orgId: string, inviteId: string) =>
+      request<void>(`/orgs/${orgId}/invites/${inviteId}`, { method: 'DELETE' }),
   },
 };

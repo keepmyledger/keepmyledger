@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { colors, radii, shadows } from '../styles/tokens';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { Account, Transaction, ReportByCategoryRow, CashflowRow } from '@keepmyledger/shared';
+import brandConfig from '@content/brand/config';
 
 const usd = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
@@ -25,6 +27,7 @@ const tileValue: React.CSSProperties = {
 };
 
 export function DashboardPage() {
+  useDocumentTitle('Dashboard');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [byCategory, setByCategory] = useState<ReportByCategoryRow[]>([]);
@@ -127,7 +130,7 @@ export function DashboardPage() {
         )}
       </div>      {empty ? (
         <div style={{ ...card, textAlign: 'center', padding: 32 }}>
-          <h2 style={{ ...sectionTitle, marginBottom: 8 }}>Welcome to KeepMyLedger</h2>
+          <h2 style={{ ...sectionTitle, marginBottom: 8 }}>Welcome to {brandConfig.name}</h2>
           <p style={{ color: colors.mutedGray, marginTop: 0 }}>
             Start by adding an account, then import a statement.
           </p>

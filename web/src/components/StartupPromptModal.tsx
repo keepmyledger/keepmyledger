@@ -12,17 +12,30 @@ export function StartupPromptModal() {
     api.startupCheck().then(setData).catch(console.error);
   }, []);
 
+  // Close on Escape
+  useEffect(() => {
+    if (dismissed || !data || data.missingStatements.length === 0) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setDismissed(true); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [dismissed, data]);
+
   if (dismissed || !data || data.missingStatements.length === 0) return null;
 
   return (
-    <div style={overlay}>
+    <div
+      style={overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="startup-modal-title"
+    >
       <div style={modal}>
-        <h2 style={{ marginTop: 0 }}>Missing Statements</h2>
+        <h2 id="startup-modal-title" style={{ marginTop: 0 }}>Missing Statements</h2>
         <p>The following accounts are missing a statement for last month:</p>
         <ul style={{ paddingLeft: 20 }}>
           {data.missingStatements.map(({ account, missingPeriod }) => (
             <li key={account.id} style={{ marginBottom: 8 }}>
-              <strong>{account.name}</strong> — {missingPeriod}
+              <strong>{account.name}</strong>: {missingPeriod}
               <button
                 style={{ marginLeft: 12 }}
                 onClick={() => {

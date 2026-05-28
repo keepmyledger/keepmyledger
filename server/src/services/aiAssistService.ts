@@ -30,7 +30,7 @@ Rules for proposing a rule:
   (e.g. "STARBUCKS", "AWS", "UBER"). Do NOT propose rules for one-off purchases,
   bank fees with unique IDs, or person-to-person transfers.
 - descriptionPattern should be a stable substring of the transaction description
-  that uniquely identifies this merchant — avoid dates, transaction IDs, or
+  that uniquely identifies this merchant; avoid dates, transaction IDs, or
   reference numbers.
 - patternKind must be "substring".
 - Skip the proposedRule if a similar rule already exists (you'll be told which

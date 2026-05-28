@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { colors, radii, shadows } from '../styles/tokens';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import brandConfig from '@content/brand/config';
 
 const PROVIDER_STYLES: Record<string, { bg: string; color: string; icon: string }> = {
-  google:   { bg: '#fff',     color: '#3c4043', icon: 'G' },
-  facebook: { bg: '#1877f2',  color: '#fff',    icon: 'f' },
-  apple:    { bg: '#000',     color: '#fff',    icon: '' },
+  google:    { bg: '#fff',     color: '#3c4043', icon: 'G' },
+  facebook:  { bg: '#1877f2',  color: '#fff',    icon: 'f' },
+  apple:     { bg: '#000',     color: '#fff',    icon: '' },
+  microsoft: { bg: '#fff',     color: '#3c4043', icon: 'M' },
 };
 
 type Mode = 'signin' | 'register' | 'mfa';
@@ -55,12 +58,16 @@ function ErrorBanner({ msg }: { msg: string }) {
 }
 
 export function LoginPage() {
+  useDocumentTitle('Sign in');
   const { config, refresh } = useAuth();
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<Mode>('signin');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [tosAccepted, setTosAccepted] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +81,14 @@ export function LoginPage() {
     setLoading(true);
     try {
       if (mode === 'register') {
-        await api.auth.local.register(username.trim(), password);
+        const trimmedBusiness = businessName.trim();
+        if (!trimmedBusiness) {
+          throw new Error('Business name is required');
+        }
+        if (trimmedBusiness.toLowerCase() === 'personal') {
+          throw new Error("'Personal' isn't a business name. Try something like 'Acme LLC' or 'Jane Smith Consulting'.");
+        }
+        await api.auth.local.register(username.trim(), password, email.trim(), trimmedBusiness);
       } else {
         const res = await api.auth.local.login(username.trim(), password);
         if (res.mfaRequired) { setMode('mfa'); return; }
@@ -117,15 +131,12 @@ export function LoginPage() {
           borderRadius: radii.lg, overflow: 'hidden',
           boxShadow: shadows.raised, background: colors.ledgerGreen,
           aspectRatio: '3 / 2',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 24,
         }}>
-          <div style={{ color: colors.warmWhite, textAlign: 'center' }}>
-            <h2 style={{ margin: 0, fontSize: 28 }}>KeepMyLedger</h2>
-            <p style={{ marginTop: 10, marginBottom: 0, opacity: 0.9 }}>
-              Self-hosted finance tracking for people and small teams.
-            </p>
-          </div>
+          <img
+            src={brandConfig.heroImagePath}
+            alt={`${brandConfig.name}: ${brandConfig.appDescription}`}
+            style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+          />
         </div>
 
         <div style={{
@@ -167,7 +178,7 @@ export function LoginPage() {
                 {mode === 'register' ? 'Create an account' : 'Sign in to continue'}
               </h1>
               <p style={{ color: colors.mutedGray, textAlign: 'center', marginTop: 8, marginBottom: 28 }}>
-                {mode === 'register' ? 'No email required.' : 'Choose a provider to get started.'}
+                {mode === 'register' ? 'Start your 14-day free trial. No credit card required.' : 'Choose a provider to get started.'}
               </p>
 
               {config?.providers.length === 0 && (
@@ -189,7 +200,7 @@ export function LoginPage() {
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
                         padding: '12px 16px', borderRadius: radii.sm, textDecoration: 'none',
                         background: s.bg, color: s.color, fontWeight: 600, fontSize: 15,
-                        border: p.id === 'google' ? `1px solid ${colors.surfaceLine}` : 'none',
+                        border: (p.id === 'google' || p.id === 'microsoft') ? `1px solid ${colors.surfaceLine}` : 'none',
                       }}>
                         <span style={{ fontSize: 18, fontWeight: 700, width: 20, textAlign: 'center' }}>{s.icon}</span>
                         Continue with {p.label}
@@ -237,17 +248,62 @@ export function LoginPage() {
                     />
                   </label>
                   {mode === 'register' && (
-                    <p style={{ fontSize: 12, color: colors.mutedGray, margin: 0 }}>
-                      No email required. There is no password recovery — save it somewhere safe.
-                    </p>
+                    <label style={labelStyle}>
+                      Email address
+                      <input
+                        type="email"
+                        autoComplete="email"
+                        placeholder="you@example.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        style={inputStyle}
+                      />
+                    </label>
+                  )}
+                  {mode === 'register' && (
+                    <label style={labelStyle}>
+                      Business name
+                      <input
+                        type="text"
+                        autoComplete="organization"
+                        placeholder="e.g. Acme LLC, Jane Smith Consulting"
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        maxLength={100}
+                        style={inputStyle}
+                      />
+                    </label>
+                  )}
+                  {mode === 'register' && (
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: colors.darkSlate, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={tosAccepted}
+                        onChange={(e) => setTosAccepted(e.target.checked)}
+                        style={{ marginTop: 2, flexShrink: 0 }}
+                      />
+                      <span>
+                        I agree to the{' '}
+                        <Link to="/terms" target="_blank" style={{ color: colors.forestGreen }}>Terms of Service</Link>
+                        {' '}and{' '}
+                        <Link to="/privacy" target="_blank" style={{ color: colors.forestGreen }}>Privacy Policy</Link>
+                      </span>
+                    </label>
                   )}
                   {error && <ErrorBanner msg={error} />}
-                  <PrimaryBtn disabled={loading || !username.trim() || !password}>
+                  <PrimaryBtn disabled={loading || !username.trim() || !password || (mode === 'register' && (!email.trim() || !businessName.trim() || !tosAccepted))}>
                     {loading
                       ? (mode === 'register' ? 'Creating account…' : 'Signing in…')
                       : (mode === 'register' ? 'Create account' : 'Sign in')}
                   </PrimaryBtn>
-                  <GhostBtn onClick={() => { setMode(mode === 'signin' ? 'register' : 'signin'); setError(null); }}>
+                  {mode === 'signin' && (
+                    <p style={{ margin: 0, textAlign: 'center', fontSize: 13 }}>
+                      <Link to="/forgot-password" style={{ color: colors.forestGreen, textDecoration: 'none' }}>
+                        Forgot your password?
+                      </Link>
+                    </p>
+                  )}
+                  <GhostBtn onClick={() => { setMode(mode === 'signin' ? 'register' : 'signin'); setEmail(''); setBusinessName(''); setTosAccepted(false); setError(null); }}>
                     {mode === 'signin' ? 'Create a new account' : 'Already have an account? Sign in'}
                   </GhostBtn>
                 </form>
@@ -255,9 +311,19 @@ export function LoginPage() {
             </>
           )}
 
-          <p style={{ marginTop: 24, textAlign: 'center', fontSize: 13, color: colors.mutedGray }}>
-            Sign in to continue.
-          </p>
+          {mode !== 'register' && (
+            <p style={{ marginTop: 24, textAlign: 'center', fontSize: 13, color: colors.mutedGray }}>
+              By continuing you agree to our{' '}
+              <Link to="/terms" style={{ color: colors.forestGreen, textDecoration: 'none' }}>
+                Terms of Service
+              </Link>
+              {' '}and{' '}
+              <Link to="/privacy" style={{ color: colors.forestGreen, textDecoration: 'none' }}>
+                Privacy Policy
+              </Link>
+              .
+            </p>
+          )}
         </div>
       </div>
     </div>

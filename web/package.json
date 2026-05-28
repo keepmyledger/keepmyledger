@@ -4,12 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && npm run prerender",
+    "prerender": "tsx scripts/prerender.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@keepmyledger/shared": "*",
+    "@sentry/react": "^10.53.1",
+    "@stripe/react-stripe-js": "^6.4.0",
+    "@stripe/stripe-js": "^9.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.23.1",
@@ -19,7 +23,8 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "tsx": "^4.22.3",
     "typescript": "^5.4.5",
-    "vite": "^5.2.12"
+    "vite": "^6.4.2"
   }
 }

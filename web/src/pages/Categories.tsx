@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Category, CreateCategoryPayload, UpdateCategoryPayload, CategoryKind } from '@keepmyledger/shared';
 import { api } from '../api/client';
+import { ConfirmModal } from '../components/ConfirmModal';
 import {
   filterBarStyle, fieldStyle, inputStyle, labelStyle,
   tableWrapStyle, tableStyle, thStyle, tdStyle,
   buttonStyle, primaryButtonStyle, smallButtonStyle,
   modalBackdropStyle, modalStyle, rowStripe, pillStyle,
 } from '../styles/table';
+import { colors } from '../styles/tokens';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 
 const KIND_LABEL: Record<CategoryKind, string> = {
   expense: 'Expense',
@@ -14,9 +17,9 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   transfer: 'Transfer',
 };
 const KIND_PILL: Record<CategoryKind, React.CSSProperties> = {
-  expense:  pillStyle('#fbe4e4', '#a52a2a'),
-  income:   pillStyle('#e7f5e0', '#3a7a1e'),
-  transfer: pillStyle('#eee', '#666'),
+  expense:  pillStyle(colors.dangerBg, colors.dangerFg),
+  income:   pillStyle(colors.successBg, colors.successFg),
+  transfer: pillStyle(colors.creamDeep, colors.mutedGray),
 };
 const KIND_SECTIONS: { label: string; kind: CategoryKind; note?: string }[] = [
   { label: 'Expense Categories', kind: 'expense' },
@@ -31,17 +34,21 @@ type GroupMode = 'kind' | 'tax';
 const mono: React.CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 };
 
 export function CategoriesPage() {
+  useDocumentTitle('Categories');
   const [categories, setCategories] = useState<Category[]>([]);
   const [editing, setEditing] = useState<Category | { kind: CategoryKind } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [groupBy, setGroupBy] = useState<GroupMode>('kind');
 
   const load = () => api.categories.list().then(setCategories).catch(console.error);
   useEffect(() => { void load(); }, []);
 
-  const del = async (id: number) => {
-    if (!confirm('Delete this category?')) return;
-    await api.categories.delete(id);
+  const del = (id: number) => setConfirmDeleteId(id);
+  const doDelete = async () => {
+    if (confirmDeleteId === null) return;
+    await api.categories.delete(confirmDeleteId);
+    setConfirmDeleteId(null);
     void load();
   };
 
@@ -101,7 +108,7 @@ export function CategoriesPage() {
             <option value="tax">Tax Code</option>
           </select>
         </label>
-        <span style={{ alignSelf: 'flex-end', color: '#666', fontSize: 13, paddingBottom: 8 }}>
+        <span style={{ alignSelf: 'flex-end', color: colors.mutedGray, fontSize: 13, paddingBottom: 8 }}>
           {filtered.length} of {categories.length} categor{categories.length === 1 ? 'y' : 'ies'}
         </span>
       </div>
@@ -116,7 +123,7 @@ export function CategoriesPage() {
             note={note}
             addLabel={`+ Add ${KIND_LABEL[kind]}`}
             onAdd={() => setEditing({ kind })}
-            columns={['Name', 'Kind', 'Tax Export Code', 'Actions']}
+            columns={['Name', 'Kind', 'Business', 'Tax Export Code', 'Actions']}
             emptyText={search ? 'No matches in this section.' : 'None.'}
           >
             {list.map((c, idx) => (
@@ -132,11 +139,11 @@ export function CategoriesPage() {
           <Section
             key={code}
             titleNode={isUntagged
-              ? <span style={{ color: '#888' }}>Untagged</span>
+              ? <span style={{ color: colors.hintText }}>Untagged</span>
               : <span style={mono}>{code}</span>}
             count={list.length}
             note={isUntagged ? 'Categories without a tax export code.' : undefined}
-            columns={['Name', 'Kind', 'Tax Export Code', 'Actions']}
+            columns={['Name', 'Kind', 'Business', 'Tax Export Code', 'Actions']}
             emptyText={search ? 'No matches in this section.' : 'None.'}
           >
             {list.map((c, idx) => (
@@ -147,7 +154,7 @@ export function CategoriesPage() {
       })}
 
       {groupBy === 'tax' && taxGroups.length === 0 && (
-        <div style={{ color: '#888', padding: 24, textAlign: 'center' }}>No categories match.</div>
+        <div style={{ color: colors.mutedGray, padding: 24, textAlign: 'center' }}>No categories match.</div>
       )}
 
       {editing && (
@@ -157,6 +164,13 @@ export function CategoriesPage() {
           knownTaxCodes={knownTaxCodes}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); void load(); }}
+        />
+      )}
+      {confirmDeleteId !== null && (
+        <ConfirmModal
+          message="Delete this category?"
+          onConfirm={() => void doDelete()}
+          onCancel={() => setConfirmDeleteId(null)}
         />
       )}
     </div>
@@ -181,11 +195,11 @@ function Section({
     <div style={{ marginBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>
-          {titleNode ?? title} <span style={{ color: '#888', fontWeight: 400, fontSize: 14 }}>({count})</span>
+          {titleNode ?? title} <span style={{ color: colors.hintText, fontWeight: 400, fontSize: 14 }}>({count})</span>
         </h2>
         {addLabel && onAdd && <button style={smallButtonStyle} onClick={onAdd}>{addLabel}</button>}
       </div>
-      {note && <p style={{ color: '#666', fontSize: 13, marginTop: 0, marginBottom: 8 }}>{note}</p>}
+      {note && <p style={{ color: colors.mutedGray, fontSize: 13, marginTop: 0, marginBottom: 8 }}>{note}</p>}
       <div className="table-wrap" style={tableWrapStyle}>
         <table style={tableStyle}>
           <thead>
@@ -193,7 +207,7 @@ function Section({
           </thead>
           <tbody>
             {isEmpty
-              ? <tr><td colSpan={columns.length} style={{ ...tdStyle, color: '#888', textAlign: 'center', padding: 16 }}>{emptyText}</td></tr>
+              ? <tr><td colSpan={columns.length} style={{ ...tdStyle, color: colors.mutedGray, textAlign: 'center', padding: 16 }}>{emptyText}</td></tr>
               : children}
           </tbody>
         </table>
@@ -209,13 +223,18 @@ function Row({
     <tr style={rowStripe(idx)}>
       <td style={{ ...tdStyle, fontWeight: 500 }}>{c.name}</td>
       <td style={tdStyle}><span style={KIND_PILL[c.kind]}>{KIND_LABEL[c.kind]}</span></td>
-      <td style={{ ...tdStyle, color: c.taxExportCode ? '#333' : '#bbb', ...(c.taxExportCode ? mono : {}) }}>
+      <td style={tdStyle}>
+        {c.isBusiness
+          ? <span style={{ fontSize: 11, background: colors.successBg, color: colors.successFg, borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>Business</span>
+          : <span style={{ fontSize: 11, background: colors.creamDeep, color: colors.mutedGray, borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>Personal</span>}
+      </td>
+      <td style={{ ...tdStyle, color: c.taxExportCode ? colors.darkSlate : colors.hintText, ...(c.taxExportCode ? mono : {}) }}>
         {c.taxExportCode ?? '—'}
       </td>
       <td style={tdStyle}>
         <div style={{ display: 'flex', gap: 4 }}>
           <button style={smallButtonStyle} onClick={onEdit}>Edit</button>
-          <button style={{ ...smallButtonStyle, color: '#a52a2a' }} onClick={onDelete}>Delete</button>
+          <button style={{ ...smallButtonStyle, color: colors.dangerFg }} onClick={onDelete}>Delete</button>
         </div>
       </td>
     </tr>
@@ -233,8 +252,8 @@ function CategoryEditorModal({
 }) {
   const isEdit = category !== null;
   const [form, setForm] = useState<CreateCategoryPayload>(() => category
-    ? { name: category.name, kind: category.kind, taxExportCode: category.taxExportCode ?? '' }
-    : { name: '', kind: defaultKind, taxExportCode: '' });
+    ? { name: category.name, kind: category.kind, taxExportCode: category.taxExportCode ?? '', isBusiness: category.isBusiness }
+    : { name: '', kind: defaultKind, taxExportCode: '', isBusiness: true });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -249,6 +268,7 @@ function CategoryEditorModal({
         name: form.name,
         kind: form.kind,
         taxExportCode: code ? code : null,
+        isBusiness: form.isBusiness,
       };
       if (isEdit && category) {
         await api.categories.update(category.id, payload);
@@ -270,7 +290,7 @@ function CategoryEditorModal({
       <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
         <h3 style={{ marginTop: 0 }}>{isEdit ? 'Edit Category' : 'New Category'}</h3>
         <form onSubmit={(e) => void submit(e)} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {error && <div style={{ color: '#9A2D20', background: '#FBE8E2', padding: 10, borderRadius: 6 }}>{error}</div>}
+          {error && <div style={{ color: colors.dangerFg, background: colors.dangerBg, padding: 10, borderRadius: 6 }}>{error}</div>}
           <label style={labelStyle}>Name
             <input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           </label>
@@ -294,12 +314,12 @@ function CategoryEditorModal({
             <datalist id="known-tax-codes">
               {knownTaxCodes.map((code) => <option key={code} value={code} />)}
             </datalist>
-            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: colors.mutedGray, marginTop: 4 }}>
               {knownTaxCodes.length === 0 ? (
-                <>No tax codes yet — type one to create the first.</>
+                <>No tax codes yet. Type one to create the first.</>
               ) : isNewCode ? (
                 <>
-                  <span style={{ color: '#3a7a1e', fontWeight: 500 }}>New code</span> — will be added.
+                  <span style={{ color: colors.successFg, fontWeight: 500 }}>New code</span>: will be added.
                   {' '}Existing: <span style={mono}>{knownTaxCodes.join(', ')}</span>
                 </>
               ) : trimmedCode ? (
@@ -318,8 +338,8 @@ function CategoryEditorModal({
                     style={{
                       ...smallButtonStyle,
                       ...mono,
-                      background: trimmedCode === code ? '#e7f0ff' : '#fff',
-                      borderColor: trimmedCode === code ? '#88aaff' : '#ddd',
+                      background: trimmedCode === code ? colors.creamDeep : colors.warmWhite,
+                      borderColor: trimmedCode === code ? colors.surfaceLine : colors.softLine,
                     }}
                   >
                     {code}
@@ -327,6 +347,16 @@ function CategoryEditorModal({
                 ))}
               </div>
             )}
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14 }}>
+            <input
+              type="checkbox"
+              checked={form.isBusiness !== false}
+              onChange={(e) => setForm({ ...form, isBusiness: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: colors.forestGreen }}
+            />
+            Counts as business expense
+            <span style={{ color: colors.hintText, fontSize: 12 }}>(uncheck for personal spending)</span>
           </label>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
             <button type="button" onClick={onClose} disabled={busy} style={buttonStyle}>Cancel</button>

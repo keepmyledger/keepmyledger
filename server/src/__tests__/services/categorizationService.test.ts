@@ -60,7 +60,7 @@ describe('CategorizationService', () => {
     const otherAcct = await h.owner.accounts.create({ name: 'Other', bankType: 'mt', accountKind: 'checking' });
     // Rule restricted to a DIFFERENT account → should not match
     await h.owner.rules.create({ name: 'scoped', descriptionPattern: 'AMAZON', patternKind: 'substring', categoryId: officeCatId, accountId: otherAcct.id });
-    // Rule with amount floor of -10 (only matches charges >= -10, i.e. small) — our tx is -50, should NOT match
+    // Rule with amount floor of -10 (only matches charges >= -10, i.e. small); our tx is -50, should NOT match
     await h.owner.rules.create({ name: 'small', descriptionPattern: 'AMAZON', patternKind: 'substring', categoryId: softwareCatId, amountMin: -10 });
     const tx = await insertTx('AMAZON.COM', -50);
     await svc.categorize(tx);

@@ -74,4 +74,18 @@ describe('SqliteReceiptRepo', () => {
     });
     expect(await h.alt.receipts.findByDriveFileId('owned-by-owner')).toBeUndefined();
   });
+
+  it('creates an S3-backed receipt with the s3 storage backend', async () => {
+    const r = await h.owner.receipts.createFromS3({
+      storageKey: 'receipts/42/abc.pdf',
+      originalFilename: 'receipt.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1234,
+    });
+    expect(r.storageBackend).toBe('s3');
+    expect(r.storageKey).toBe('receipts/42/abc.pdf');
+    expect(r.driveFileId).toBeNull();
+    expect((await h.owner.receipts.findByStorageKey('receipts/42/abc.pdf'))?.id).toBe(r.id);
+    expect(await h.alt.receipts.findByStorageKey('receipts/42/abc.pdf')).toBeUndefined();
+  });
 });

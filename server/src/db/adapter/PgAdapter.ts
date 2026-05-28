@@ -1,5 +1,12 @@
-import { Pool, PoolClient } from 'pg';
+import { Pool, PoolClient, types as pgTypes } from 'pg';
 import { DbAdapter } from '../adapter';
+
+// Return TIMESTAMP (OID 1114) and TIMESTAMPTZ (OID 1184) columns as ISO
+// strings rather than JavaScript Date objects. This keeps the adapter's
+// return shape consistent with the SQLite adapter (which stores timestamps
+// as TEXT) and avoids type-cast lies like `(row.created_at as string)`.
+pgTypes.setTypeParser(1114, (val: string) => val); // TIMESTAMP
+pgTypes.setTypeParser(1184, (val: string) => val); // TIMESTAMPTZ
 
 /** Rewrite ?, ?, ? placeholders to $1, $2, $3 for Postgres. */
 function pgify(sql: string): string {
@@ -36,7 +43,7 @@ class PgAdapterBase implements DbAdapter {
   }
 
   async transaction<T>(fn: (tx: DbAdapter) => Promise<T>): Promise<T> {
-    if (this.isTx) return fn(this); // already inside a tx — just run inline
+    if (this.isTx) return fn(this); // already inside a tx, just run inline
     if (!('connect' in this.client)) {
       throw new Error('PgAdapter.transaction can only start a new tx from a pool');
     }

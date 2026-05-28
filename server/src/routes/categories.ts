@@ -21,7 +21,8 @@ export function categoriesRouter(): Router {
   });
 
   router.patch('/:id', async (req: Request, res: Response) => {
-    const cat = await req.ctx!.repos.categories.update(Number(req.params.id), req.body);
+    const { name, kind, taxExportCode } = req.body as Record<string, unknown>;
+    const cat = await req.ctx!.repos.categories.update(Number(req.params.id), { name, kind, taxExportCode } as never);
     if (!cat) return res.status(404).json({ error: 'Category not found' });
     res.json(cat);
   });

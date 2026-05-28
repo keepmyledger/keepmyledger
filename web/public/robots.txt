@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /transactions
+Disallow: /reports
+Disallow: /import
+Disallow: /accounts
+Disallow: /categories
+Disallow: /rules
+Disallow: /billing
+Disallow: /admin
+
+Sitemap: https://example.com/sitemap.xml

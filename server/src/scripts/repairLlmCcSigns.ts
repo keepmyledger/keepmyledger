@@ -2,13 +2,10 @@
 // to LLM-parsed credit-card statements that were double-flipped by importService.
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
-import fs from 'node:fs';
 import { hashTransaction } from '../parsers/utils';
 
 const dataDir = path.resolve(__dirname, '../../data');
-const newPath = path.join(dataDir, 'keepmyledger.db');
-const legacyPath = path.join(dataDir, 'expense-tracker.db');
-const dbPath = fs.existsSync(newPath) ? newPath : legacyPath;
+const dbPath = process.env.DB_PATH ?? path.join(dataDir, 'keepmyledger.db');
 const db = new DatabaseSync(dbPath);
 
 const rows = db.prepare(`

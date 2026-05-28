@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Runs all migration files in order. Safe to run multiple times — each
+ * Runs all migration files in order. Safe to run multiple times; each
  * migration is wrapped in a transaction and skipped if already applied
  * (tracked in the `app_state` table under key `migration:<name>`).
  */
